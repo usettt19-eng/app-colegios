@@ -87,10 +87,15 @@ export const ParentStudentPortal: React.FC = () => {
   const [carpoolForm, setCarpoolForm] = useState({ driver_parent_id: '', day_of_week: '1' });
   const [overrideForm, setOverrideForm] = useState({ driver_parent_id: '', override_date: '' });
 
-  // --- Perfil: fotos del alumno y del padre/tutor ---
+  // --- Perfil: fotos e información general del alumno y del padre/tutor ---
   const [studentPhoto, setStudentPhoto] = useState<string | null>(null);
   const [parentPhoto, setParentPhoto] = useState<string | null>(null);
   const [photoLoading, setPhotoLoading] = useState(false);
+  const [generalInfoLoading, setGeneralInfoLoading] = useState(false);
+  const [generalInfoForm, setGeneralInfoForm] = useState({
+    cedula: '', first_name: '', last_name: '', phone: '', office_phone: '', mobile_phone: '',
+    nationality: '', email: '', confirm_email: '', profession: '', workplace: '', address: '',
+  });
 
   const loadProfilePhotos = async () => {
     try {
@@ -102,9 +107,52 @@ export const ParentStudentPortal: React.FC = () => {
       const parentData = await parentRes.json();
       setStudentPhoto(studentData.student?.photo_url || null);
       setParentPhoto(parentData.profile?.photo_url || null);
+      const p = parentData.profile;
+      if (p) {
+        setGeneralInfoForm({
+          cedula: p.cedula || '',
+          first_name: p.first_name || '',
+          last_name: p.last_name || '',
+          phone: p.phone || '',
+          office_phone: p.office_phone || '',
+          mobile_phone: p.mobile_phone || '',
+          nationality: p.nationality || '',
+          email: p.email || '',
+          confirm_email: p.email || '',
+          profession: p.profession || '',
+          workplace: p.workplace || '',
+          address: p.address || '',
+        });
+      }
     } catch {
       setMessage('❌ No se pudo conectar con el servidor SIS.');
     }
+  };
+
+  const handleSaveGeneralInfo = async () => {
+    if (generalInfoForm.email !== generalInfoForm.confirm_email) {
+      setMessage('❌ El correo y su confirmación no coinciden.');
+      return;
+    }
+    setGeneralInfoLoading(true);
+    setMessage('');
+    try {
+      const { confirm_email, ...payload } = generalInfoForm;
+      const response = await fetch(`/api/v1/profiles/${DEMO_PARENT_ID}/general-info`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Información general actualizada.');
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo guardar la información.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setGeneralInfoLoading(false);
   };
 
   const handleUploadStudentPhoto = async (file: File | undefined) => {
@@ -695,6 +743,7 @@ export const ParentStudentPortal: React.FC = () => {
           )}
 
           {activeTab === 'profile' && (
+            <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-3 text-center">
                 <h2 className="font-bold text-slate-700 flex items-center justify-center"><GraduationCap className="w-4 h-4 mr-2 text-purple-600" /> Foto del Alumno</h2>
@@ -733,6 +782,121 @@ export const ParentStudentPortal: React.FC = () => {
                   />
                 </label>
               </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="px-6 py-4 bg-blue-600">
+                <h2 className="font-bold text-white">Información General (Padre/Tutor)</h2>
+              </div>
+              <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Cédula</label>
+                  <input
+                    type="text" value={generalInfoForm.cedula}
+                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, cedula: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Nombre</label>
+                  <input
+                    type="text" value={generalInfoForm.first_name}
+                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, first_name: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Apellido</label>
+                  <input
+                    type="text" value={generalInfoForm.last_name}
+                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, last_name: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Teléfono</label>
+                  <input
+                    type="text" value={generalInfoForm.phone}
+                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, phone: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Tel. Oficina</label>
+                  <input
+                    type="text" value={generalInfoForm.office_phone}
+                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, office_phone: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Tel. Móvil</label>
+                  <input
+                    type="text" value={generalInfoForm.mobile_phone}
+                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, mobile_phone: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Nacionalidad</label>
+                  <input
+                    type="text" value={generalInfoForm.nationality}
+                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, nationality: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Email</label>
+                  <input
+                    type="email" value={generalInfoForm.email}
+                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, email: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Confirmar Email</label>
+                  <input
+                    type="email" value={generalInfoForm.confirm_email}
+                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, confirm_email: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Profesión</label>
+                  <input
+                    type="text" value={generalInfoForm.profession}
+                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, profession: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Lugar de Trabajo</label>
+                  <input
+                    type="text" value={generalInfoForm.workplace}
+                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, workplace: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-slate-500 mb-1">Dirección</label>
+                  <input
+                    type="text" value={generalInfoForm.address}
+                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, address: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <div className="px-6 pb-6">
+                <button
+                  onClick={handleSaveGeneralInfo}
+                  disabled={generalInfoLoading}
+                  className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm"
+                >
+                  {generalInfoLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2" />}
+                  Guardar Información General
+                </button>
+              </div>
+            </div>
             </div>
           )}
         </>
