@@ -19,7 +19,7 @@ const client = new Client({
   }
 });
 
-const artifactDir = "C:/Users/DELL Latitude 3490/.gemini/antigravity/brain/88883497-706a-42bb-a98e-44ad5c685b16";
+const artifactDir = path.join(__dirname, "database_schemas");
 
 const schemasToExecute = [
   "full_schema.md",
