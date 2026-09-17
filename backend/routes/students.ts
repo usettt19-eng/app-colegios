@@ -7,7 +7,7 @@ const router = Router();
 // Crea el expediente de un alumno de primer ingreso (inicio del proceso de admisión)
 router.post("/", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, first_name, last_name, grade, section, parent_id } = req.body;
+    const { tenant_id, first_name, last_name, grade, section, parent_id, photo_url } = req.body;
 
     if (!tenant_id || !first_name || !last_name) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, first_name, last_name)" });
@@ -15,7 +15,7 @@ router.post("/", async (req: Request, res: Response) => {
 
     const { data: student, error } = await supabaseAdmin
       .from("students")
-      .insert({ tenant_id, first_name, last_name, grade, section })
+      .insert({ tenant_id, first_name, last_name, grade, section, photo_url: photo_url || null })
       .select()
       .single();
 
@@ -42,6 +42,47 @@ router.post("/", async (req: Request, res: Response) => {
     return res.status(201).json({ success: true, message: "Expediente de alumno creado.", student });
   } catch (error: any) {
     console.error("Error en POST /api/v1/students:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// GET /api/v1/students/:id
+// Consulta el expediente básico del alumno (usado para mostrar su foto y datos generales)
+router.get("/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const { data, error } = await supabaseAdmin.from("students").select("*").eq("id", id).single();
+    if (error || !data) return res.status(404).json({ error: "Alumno no encontrado." });
+
+    return res.status(200).json({ success: true, student: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/students/:id:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/students/:id/photo
+// Actualiza la foto del expediente del alumno
+router.post("/:id/photo", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { photo_url } = req.body;
+
+    if (!photo_url) return res.status(400).json({ error: "Falta photo_url" });
+
+    const { data: student, error } = await supabaseAdmin
+      .from("students")
+      .update({ photo_url })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error || !student) return res.status(404).json({ error: "Alumno no encontrado." });
+
+    return res.status(200).json({ success: true, message: "Foto del alumno actualizada.", student });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/students/:id/photo:", error);
     return res.status(500).json({ error: "Error interno" });
   }
 });

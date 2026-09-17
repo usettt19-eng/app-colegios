@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { GraduationCap, FileText, CreditCard, FileSignature, CheckCircle, AlertTriangle, Download, Loader2, Car, UserCheck, Plus } from 'lucide-react';
+import { GraduationCap, FileText, CreditCard, FileSignature, CheckCircle, AlertTriangle, Download, Loader2, Car, UserCheck, Plus, Camera, UserCircle2 } from 'lucide-react';
 
 // Contexto de demostración: en producción estos IDs vienen del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = 'tenant-demo-123';
@@ -8,7 +8,16 @@ const DEMO_PARENT_ID = 'parent-demo-123';
 
 const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-type TabId = 'grades' | 'bulletins' | 'contracts' | 'payments' | 'pickup';
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+type TabId = 'grades' | 'bulletins' | 'contracts' | 'payments' | 'pickup' | 'profile';
 
 interface ReplacementRequest {
   id: string;
@@ -78,6 +87,74 @@ export const ParentStudentPortal: React.FC = () => {
   const [carpoolForm, setCarpoolForm] = useState({ driver_parent_id: '', day_of_week: '1' });
   const [overrideForm, setOverrideForm] = useState({ driver_parent_id: '', override_date: '' });
 
+  // --- Perfil: fotos del alumno y del padre/tutor ---
+  const [studentPhoto, setStudentPhoto] = useState<string | null>(null);
+  const [parentPhoto, setParentPhoto] = useState<string | null>(null);
+  const [photoLoading, setPhotoLoading] = useState(false);
+
+  const loadProfilePhotos = async () => {
+    try {
+      const [studentRes, parentRes] = await Promise.all([
+        fetch(`/api/v1/students/${DEMO_STUDENT_ID}`),
+        fetch(`/api/v1/profiles/${DEMO_PARENT_ID}`),
+      ]);
+      const studentData = await studentRes.json();
+      const parentData = await parentRes.json();
+      setStudentPhoto(studentData.student?.photo_url || null);
+      setParentPhoto(parentData.profile?.photo_url || null);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+  };
+
+  const handleUploadStudentPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    setPhotoLoading(true);
+    setMessage('');
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const response = await fetch(`/api/v1/students/${DEMO_STUDENT_ID}/photo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photo_url: dataUrl }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setStudentPhoto(dataUrl);
+        setMessage('✅ Foto del alumno actualizada.');
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo actualizar la foto.'));
+      }
+    } catch {
+      setMessage('❌ Error al subir la foto.');
+    }
+    setPhotoLoading(false);
+  };
+
+  const handleUploadParentPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    setPhotoLoading(true);
+    setMessage('');
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const response = await fetch(`/api/v1/profiles/${DEMO_PARENT_ID}/photo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photo_url: dataUrl }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setParentPhoto(dataUrl);
+        setMessage('✅ Tu foto de perfil fue actualizada.');
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo actualizar la foto.'));
+      }
+    } catch {
+      setMessage('❌ Error al subir la foto.');
+    }
+    setPhotoLoading(false);
+  };
+
   const loadPickupData = async () => {
     try {
       const [replacementsRes, carpoolRes, overridesRes] = await Promise.all([
@@ -98,6 +175,7 @@ export const ParentStudentPortal: React.FC = () => {
 
   useEffect(() => {
     if (activeTab === 'pickup') loadPickupData();
+    if (activeTab === 'profile') loadProfilePhotos();
   }, [activeTab]);
 
   const handleCreateReplacement = async () => {
@@ -309,6 +387,12 @@ export const ParentStudentPortal: React.FC = () => {
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'pickup' ? 'bg-purple-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
           <Car className="w-4 h-4 mr-2" /> Recogida y Carpool
+        </button>
+        <button
+          onClick={() => setActiveTab('profile')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'profile' ? 'bg-purple-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <UserCircle2 className="w-4 h-4 mr-2" /> Perfil
         </button>
       </div>
 
@@ -606,6 +690,48 @@ export const ParentStudentPortal: React.FC = () => {
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'profile' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-3 text-center">
+                <h2 className="font-bold text-slate-700 flex items-center justify-center"><GraduationCap className="w-4 h-4 mr-2 text-purple-600" /> Foto del Alumno</h2>
+                <div className="w-28 h-28 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center mx-auto">
+                  {studentPhoto ? (
+                    <img src={studentPhoto} alt="Foto del alumno" className="w-full h-full object-cover" />
+                  ) : (
+                    <Camera className="w-8 h-8 text-slate-300" />
+                  )}
+                </div>
+                <label className="inline-flex items-center px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-md text-sm font-semibold cursor-pointer">
+                  {photoLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Camera className="w-4 h-4 mr-2" />}
+                  Actualizar Foto
+                  <input
+                    type="file" accept="image/*" className="hidden" disabled={photoLoading}
+                    onChange={e => handleUploadStudentPhoto(e.target.files?.[0])}
+                  />
+                </label>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-3 text-center">
+                <h2 className="font-bold text-slate-700 flex items-center justify-center"><UserCircle2 className="w-4 h-4 mr-2 text-purple-600" /> Mi Foto (Padre/Tutor)</h2>
+                <div className="w-28 h-28 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center mx-auto">
+                  {parentPhoto ? (
+                    <img src={parentPhoto} alt="Tu foto" className="w-full h-full object-cover" />
+                  ) : (
+                    <Camera className="w-8 h-8 text-slate-300" />
+                  )}
+                </div>
+                <label className="inline-flex items-center px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-md text-sm font-semibold cursor-pointer">
+                  {photoLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Camera className="w-4 h-4 mr-2" />}
+                  Actualizar Foto
+                  <input
+                    type="file" accept="image/*" className="hidden" disabled={photoLoading}
+                    onChange={e => handleUploadParentPhoto(e.target.files?.[0])}
+                  />
+                </label>
               </div>
             </div>
           )}

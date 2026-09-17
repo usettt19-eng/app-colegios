@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
-import { ClipboardList, UserPlus, FileUp, FileSignature, CheckCircle2, Loader2, ArrowRight, Stethoscope, IdCard, GraduationCap as GradIcon, FileText } from 'lucide-react';
+import { ClipboardList, UserPlus, FileUp, FileSignature, CheckCircle2, Loader2, ArrowRight, Stethoscope, IdCard, GraduationCap as GradIcon, FileText, Camera } from 'lucide-react';
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 // Contexto de demostración: en producción tenant_id/parent_id vienen del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = 'tenant-demo-123';
@@ -28,6 +37,17 @@ export const AdmissionsPortal: React.FC = () => {
 
   const [studentForm, setStudentForm] = useState({ first_name: '', last_name: '', grade: '', section: '' });
   const [studentId, setStudentId] = useState<string | null>(null);
+  const [studentPhoto, setStudentPhoto] = useState<string | null>(null);
+
+  const handlePhotoSelected = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setStudentPhoto(dataUrl);
+    } catch {
+      setMessage('❌ No se pudo leer la foto seleccionada.');
+    }
+  };
 
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDoc[]>([]);
   const [selectedDocType, setSelectedDocType] = useState(DOC_TYPES[0].value);
@@ -46,7 +66,7 @@ export const AdmissionsPortal: React.FC = () => {
       const response = await fetch('/api/v1/students', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, parent_id: DEMO_PARENT_ID, ...studentForm }),
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, parent_id: DEMO_PARENT_ID, photo_url: studentPhoto, ...studentForm }),
       });
       const data = await response.json();
       if (data.success) {
@@ -188,6 +208,27 @@ export const AdmissionsPortal: React.FC = () => {
       {step === 1 && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
           <h2 className="font-bold text-slate-700 flex items-center"><UserPlus className="w-4 h-4 mr-2 text-teal-600" /> Datos del Alumno Postulante</h2>
+
+          <div className="flex items-center gap-4">
+            <div className="w-20 h-20 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
+              {studentPhoto ? (
+                <img src={studentPhoto} alt="Foto del alumno" className="w-full h-full object-cover" />
+              ) : (
+                <Camera className="w-6 h-6 text-slate-300" />
+              )}
+            </div>
+            <div>
+              <label className="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-sm font-semibold cursor-pointer">
+                <Camera className="w-4 h-4 mr-2" /> Subir Foto del Alumno
+                <input
+                  type="file" accept="image/*" className="hidden"
+                  onChange={e => handlePhotoSelected(e.target.files?.[0])}
+                />
+              </label>
+              <p className="text-xs text-slate-400 mt-1">Se guarda en el expediente del alumno.</p>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <input
               type="text" placeholder="Nombre" value={studentForm.first_name}
@@ -292,6 +333,13 @@ export const AdmissionsPortal: React.FC = () => {
             <CheckCircle2 className="w-6 h-6 mr-2" />
             <h2 className="font-bold text-lg">Proceso de Admisión Completado</h2>
           </div>
+
+          {studentPhoto && (
+            <div className="w-20 h-20 rounded-full overflow-hidden border border-slate-200">
+              <img src={studentPhoto} alt="Foto del alumno" className="w-full h-full object-cover" />
+            </div>
+          )}
+
           <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div>
               <dt className="text-slate-400">Alumno</dt>

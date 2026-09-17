@@ -154,7 +154,7 @@ router.get("/classes/:id/roster", async (req: Request, res: Response) => {
 
     const { data, error } = await supabaseAdmin
       .from("class_enrollments")
-      .select("id, final_grade, enrollments!inner(student_id, students(id, first_name, last_name))")
+      .select("id, final_grade, enrollments!inner(student_id, students(id, first_name, last_name, photo_url))")
       .eq("class_id", id);
 
     if (error) return res.status(500).json({ error: "Error al consultar el roster de la clase." });
@@ -165,6 +165,7 @@ router.get("/classes/:id/roster", async (req: Request, res: Response) => {
       student_id: ce.enrollments?.student_id,
       first_name: ce.enrollments?.students?.first_name,
       last_name: ce.enrollments?.students?.last_name,
+      photo_url: ce.enrollments?.students?.photo_url,
     }));
 
     return res.status(200).json({ success: true, roster });
