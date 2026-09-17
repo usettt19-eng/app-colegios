@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Network, Database, Globe, Layers, Users, Cpu, ShieldCheck, HelpCircle, Server, FileCode, CheckCircle2, UserCircle, Briefcase, GraduationCap, ClipboardList } from "lucide-react";
+import { Network, Database, Globe, Layers, Users, Cpu, ShieldCheck, HelpCircle, Server, FileCode, CheckCircle2, UserCircle, Briefcase, GraduationCap, ClipboardList, Settings2 } from "lucide-react";
 import ArchitectureVisualizer from "./components/ArchitectureVisualizer";
 import DatabaseSchemaExplorer from "./components/DatabaseSchemaExplorer";
 import APIPlayground from "./components/APIPlayground";
@@ -10,8 +10,9 @@ import { TeacherPortal } from "./portals/TeacherPortal";
 import { CorporatePortal } from "./portals/CorporatePortal";
 import { ParentStudentPortal } from "./portals/ParentStudentPortal";
 import { AdmissionsPortal } from "./portals/AdmissionsPortal";
+import { AdminAdvancedPortal } from "./portals/AdminAdvancedPortal";
 
-type TabId = "diagram" | "database" | "api" | "modules" | "portals" | "ai_advisor" | "teacher_real" | "corporate_real" | "parent_real" | "admissions_real";
+type TabId = "diagram" | "database" | "api" | "modules" | "portals" | "ai_advisor" | "teacher_real" | "corporate_real" | "parent_real" | "admissions_real" | "admin_real";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>("diagram");
@@ -122,6 +123,19 @@ export default function App() {
             VER PORTAL ADMISIONES
           </button>
 
+          {/* Admin Advanced Portal */}
+          <button
+            onClick={() => setActiveTab("admin_real")}
+            className={`px-4 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all duration-200 shrink-0 cursor-pointer ${
+              activeTab === "admin_real"
+                ? "bg-rose-600 text-white shadow-lg shadow-rose-600/15"
+                : "text-rose-400 hover:text-rose-200 hover:bg-slate-800/40 border border-rose-900/30"
+            }`}
+          >
+            <Settings2 className="w-4 h-4" />
+            VER PORTAL ADMIN
+          </button>
+
           <button
             onClick={() => setActiveTab("database")}
             className={`px-4 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all duration-200 shrink-0 cursor-pointer ${
@@ -183,6 +197,11 @@ export default function App() {
           {activeTab === "admissions_real" && (
             <div className="bg-slate-50 rounded-xl overflow-hidden min-h-[600px]">
               <AdmissionsPortal />
+            </div>
+          )}
+          {activeTab === "admin_real" && (
+            <div className="bg-slate-50 rounded-xl overflow-hidden min-h-[600px]">
+              <AdminAdvancedPortal />
             </div>
           )}
         </div>
