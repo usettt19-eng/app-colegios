@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Package, Monitor, Briefcase, TrendingDown, Plus, CheckCircle, Search, Laptop, PenTool, HardDrive, Wallet, Users, Calculator, Loader2 } from 'lucide-react';
+import { Package, Monitor, Briefcase, TrendingDown, Plus, CheckCircle, Search, Laptop, PenTool, HardDrive, Wallet, Users, Calculator, Loader2, Truck, ShoppingCart } from 'lucide-react';
 
 const MOCK_ASSETS = [
   { id: '1', tag: 'IT-2026-001', name: 'MacBook Air M2', condition: 'Nuevo', assignedTo: 'Sin asignar' },
@@ -40,9 +40,31 @@ interface Paystub {
   hr_employees?: { profiles?: { first_name: string; last_name: string } };
 }
 
+interface Vendor {
+  id: string;
+  name: string;
+  contact_email: string | null;
+  service_type: string | null;
+}
+
+interface PurchaseOrder {
+  id: string;
+  total_cost: number;
+  status: string;
+  created_at: string;
+  vendors?: { name: string; service_type: string | null };
+}
+
 export const CorporatePortal: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'assets' | 'consumables' | 'payroll'>('assets');
+  const [activeTab, setActiveTab] = useState<'assets' | 'consumables' | 'payroll' | 'procurement'>('assets');
   const [message, setMessage] = useState('');
+
+  // --- Proveedores y Compras ---
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [procurementLoading, setProcurementLoading] = useState(false);
+  const [vendorForm, setVendorForm] = useState({ name: '', contact_email: '', service_type: '' });
+  const [poForm, setPoForm] = useState({ vendor_id: '', total_cost: '' });
 
   // --- Nómina ---
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -72,7 +94,103 @@ export const CorporatePortal: React.FC = () => {
 
   useEffect(() => {
     if (activeTab === 'payroll') loadPayrollData();
+    if (activeTab === 'procurement') loadProcurementData();
   }, [activeTab]);
+
+  const loadProcurementData = async () => {
+    try {
+      const [vendorsRes, poRes] = await Promise.all([
+        fetch(`/api/v1/corporate/vendors?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/corporate/purchase-orders?tenant_id=${DEMO_TENANT_ID}`),
+      ]);
+      const vendorsData = await vendorsRes.json();
+      const poData = await poRes.json();
+      setVendors(vendorsData.vendors || []);
+      setPurchaseOrders(poData.purchaseOrders || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+  };
+
+  const handleAddVendor = async () => {
+    if (!vendorForm.name) {
+      setMessage('❌ El nombre del proveedor es requerido.');
+      return;
+    }
+    setProcurementLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/corporate/vendors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, ...vendorForm }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Proveedor registrado.');
+        setVendorForm({ name: '', contact_email: '', service_type: '' });
+        loadProcurementData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo registrar el proveedor.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setProcurementLoading(false);
+  };
+
+  const handleCreatePurchaseOrder = async () => {
+    if (!poForm.vendor_id || !poForm.total_cost) {
+      setMessage('❌ Selecciona un proveedor e indica el costo total.');
+      return;
+    }
+    setProcurementLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/corporate/purchase-orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          vendor_id: poForm.vendor_id,
+          total_cost: Number(poForm.total_cost),
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Orden de compra creada, pendiente de aprobación.');
+        setPoForm({ vendor_id: '', total_cost: '' });
+        loadProcurementData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo crear la orden de compra.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setProcurementLoading(false);
+  };
+
+  const handleUpdatePOStatus = async (id: string, status: string) => {
+    setProcurementLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/corporate/purchase-orders/${id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ ' + data.message);
+        loadProcurementData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo actualizar la orden de compra.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setProcurementLoading(false);
+  };
 
   const handleAddEmployee = async () => {
     if (!employeeForm.profile_id || !employeeForm.hire_date || !employeeForm.base_salary) {
@@ -220,6 +338,12 @@ export const CorporatePortal: React.FC = () => {
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'payroll' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
           <Wallet className="w-4 h-4 mr-2" /> Nómina y Planillas
+        </button>
+        <button
+          onClick={() => setActiveTab('procurement')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'procurement' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <Truck className="w-4 h-4 mr-2" /> Proveedores y Compras
         </button>
       </div>
 
@@ -521,6 +645,150 @@ export const CorporatePortal: React.FC = () => {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Proveedores y Compras */}
+      {activeTab === 'procurement' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
+              <h2 className="font-bold text-slate-700 flex items-center"><Truck className="w-4 h-4 mr-2 text-blue-600" /> Registrar Proveedor</h2>
+              <input
+                type="text" placeholder="Nombre del proveedor" value={vendorForm.name}
+                onChange={e => setVendorForm({ ...vendorForm, name: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="email" placeholder="Correo de contacto" value={vendorForm.contact_email}
+                onChange={e => setVendorForm({ ...vendorForm, contact_email: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="text" placeholder="Tipo de servicio (ej. Mantenimiento)" value={vendorForm.service_type}
+                onChange={e => setVendorForm({ ...vendorForm, service_type: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={handleAddVendor}
+                disabled={procurementLoading}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm"
+              >
+                {procurementLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                Registrar Proveedor
+              </button>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
+              <h2 className="font-bold text-slate-700 flex items-center"><ShoppingCart className="w-4 h-4 mr-2 text-blue-600" /> Nueva Orden de Compra</h2>
+              <select
+                value={poForm.vendor_id}
+                onChange={e => setPoForm({ ...poForm, vendor_id: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Selecciona el proveedor</option>
+                {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+              <input
+                type="number" placeholder="Costo total" value={poForm.total_cost}
+                onChange={e => setPoForm({ ...poForm, total_cost: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={handleCreatePurchaseOrder}
+                disabled={procurementLoading}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm"
+              >
+                {procurementLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                Crear Orden de Compra
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center">
+              <Truck className="w-4 h-4 mr-2 text-blue-600" />
+              <h2 className="font-bold text-slate-700">Proveedores</h2>
+            </div>
+            {vendors.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay proveedores registrados.</p>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">NOMBRE</th>
+                    <th className="px-4 py-3 font-semibold">SERVICIO</th>
+                    <th className="px-4 py-3 font-semibold">CONTACTO</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {vendors.map(v => (
+                    <tr key={v.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-semibold">{v.name}</td>
+                      <td className="px-4 py-3 text-slate-500">{v.service_type || '—'}</td>
+                      <td className="px-4 py-3 text-slate-500">{v.contact_email || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center">
+              <ShoppingCart className="w-4 h-4 mr-2 text-blue-600" />
+              <h2 className="font-bold text-slate-700">Órdenes de Compra (Cuentas por Pagar)</h2>
+            </div>
+            {purchaseOrders.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay órdenes de compra registradas.</p>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">PROVEEDOR</th>
+                    <th className="px-4 py-3 font-semibold text-right">MONTO</th>
+                    <th className="px-4 py-3 font-semibold">ESTADO</th>
+                    <th className="px-4 py-3 font-semibold text-right">ACCIÓN</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {purchaseOrders.map(po => (
+                    <tr key={po.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-semibold">{po.vendors?.name || '—'}</td>
+                      <td className="px-4 py-3 text-right font-mono">${Number(po.total_cost).toFixed(2)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                          po.status === 'paid' ? 'bg-emerald-100 text-emerald-700' :
+                          po.status === 'approved' ? 'bg-blue-100 text-blue-700' :
+                          po.status === 'cancelled' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                        }`}>{po.status}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right space-x-2">
+                        {po.status === 'pending_approval' && (
+                          <button
+                            onClick={() => handleUpdatePOStatus(po.id, 'approved')}
+                            disabled={procurementLoading}
+                            className="text-blue-600 font-bold hover:text-blue-800 bg-blue-50 px-3 py-1 rounded disabled:opacity-50"
+                          >
+                            Aprobar
+                          </button>
+                        )}
+                        {po.status === 'approved' && (
+                          <button
+                            onClick={() => handleUpdatePOStatus(po.id, 'paid')}
+                            disabled={procurementLoading}
+                            className="text-emerald-600 font-bold hover:text-emerald-800 bg-emerald-50 px-3 py-1 rounded disabled:opacity-50"
+                          >
+                            Marcar Pagada
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
 

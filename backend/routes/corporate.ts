@@ -4,6 +4,144 @@ import { supabaseAdmin } from "../supabase";
 const router = Router();
 
 // ==========================================
+// MÓDULO DE PROVEEDORES Y CUENTAS POR PAGAR
+// ==========================================
+
+// GET /api/v1/corporate/vendors?tenant_id=...
+router.get("/vendors", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    const { data, error } = await supabaseAdmin
+      .from("vendors")
+      .select("*")
+      .eq("tenant_id", tenant_id)
+      .order("name");
+
+    if (error) return res.status(500).json({ error: "Error al consultar los proveedores." });
+    return res.status(200).json({ success: true, vendors: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/corporate/vendors:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/corporate/vendors
+router.post("/vendors", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, name, contact_email, tax_id, service_type } = req.body;
+    if (!tenant_id || !name) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, name)" });
+    }
+
+    const { data: vendor, error } = await supabaseAdmin
+      .from("vendors")
+      .insert({ tenant_id, name, contact_email, tax_id, service_type })
+      .select()
+      .single();
+
+    if (error || !vendor) {
+      console.error("Error al crear proveedor:", error);
+      return res.status(500).json({ error: "Error al registrar el proveedor." });
+    }
+
+    return res.status(201).json({ success: true, message: "Proveedor registrado.", vendor });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/corporate/vendors:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// GET /api/v1/corporate/purchase-orders?tenant_id=...
+router.get("/purchase-orders", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    const { data, error } = await supabaseAdmin
+      .from("purchase_orders")
+      .select("*, vendors(name, service_type), profiles(first_name, last_name)")
+      .eq("tenant_id", tenant_id)
+      .order("created_at", { ascending: false });
+
+    if (error) return res.status(500).json({ error: "Error al consultar las órdenes de compra." });
+    return res.status(200).json({ success: true, purchaseOrders: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/corporate/purchase-orders:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/corporate/purchase-orders
+// Crea una orden de compra en estado "pending_approval"
+router.post("/purchase-orders", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, vendor_id, requested_by, total_cost } = req.body;
+    if (!tenant_id || !vendor_id || total_cost === undefined) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, vendor_id, total_cost)" });
+    }
+
+    const { data: purchaseOrder, error } = await supabaseAdmin
+      .from("purchase_orders")
+      .insert({ tenant_id, vendor_id, requested_by: requested_by || null, total_cost, status: "pending_approval" })
+      .select()
+      .single();
+
+    if (error || !purchaseOrder) {
+      console.error("Error al crear orden de compra:", error);
+      return res.status(500).json({ error: "Error al registrar la orden de compra." });
+    }
+
+    await supabaseAdmin.from("audit_logs").insert({
+      tenant_id,
+      event_type: "FINANCE",
+      description: `Se solicitó una orden de compra por $${total_cost} al proveedor (ID: ${vendor_id}).`,
+      actor_name: "Procurement System",
+    });
+
+    return res.status(201).json({ success: true, message: "Orden de compra creada, pendiente de aprobación.", purchaseOrder });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/corporate/purchase-orders:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/corporate/purchase-orders/:id/status
+// Avanza el estado de la orden de compra: approved -> paid, o cancelled
+router.post("/purchase-orders/:id/status", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body; // 'approved' | 'paid' | 'cancelled'
+
+    if (!["approved", "paid", "cancelled"].includes(status)) {
+      return res.status(400).json({ error: "Estado inválido. Usa 'approved', 'paid' o 'cancelled'." });
+    }
+
+    const { data: purchaseOrder, error } = await supabaseAdmin
+      .from("purchase_orders")
+      .update({ status })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error || !purchaseOrder) return res.status(404).json({ error: "Orden de compra no encontrada." });
+
+    await supabaseAdmin.from("audit_logs").insert({
+      tenant_id: purchaseOrder.tenant_id,
+      event_type: "FINANCE",
+      description: `La orden de compra (ID: ${id}) cambió de estado a "${status}".`,
+      actor_name: "Procurement System",
+    });
+
+    return res.status(200).json({ success: true, message: `Orden de compra marcada como "${status}".`, purchaseOrder });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/corporate/purchase-orders/:id/status:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// ==========================================
 // MÓDULO DE ACTIVOS FIJOS (COMPUTADORAS/PATRIMONIO)
 // ==========================================
 
