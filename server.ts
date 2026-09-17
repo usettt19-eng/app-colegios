@@ -26,8 +26,35 @@ function getGeminiClient(): GoogleGenAI {
   return ai;
 }
 
+import pickupRoutes from "./backend/routes/pickup";
+import enrollmentRoutes from "./backend/routes/enrollments";
+import attendanceRoutes from "./backend/routes/attendance";
+import financeRoutes from "./backend/routes/finance";
+import lmsRoutes from "./backend/routes/lms";
+import assignmentsRoutes from "./backend/routes/assignments";
+import bulletinsRoutes from "./backend/routes/bulletins";
+import contractsRoutes from "./backend/routes/contracts";
+import documentsRoutes from "./backend/routes/documents";
+import communicationsRoutes from "./backend/routes/communications";
+import corporateRoutes from "./backend/routes/corporate";
+import { startAutoReleaseJob } from "./backend/jobs/autoRelease";
+
 const app = express();
 app.use(express.json());
+app.use("/api/v1/pickup", pickupRoutes);
+app.use("/api/v1/enrollments", enrollmentRoutes);
+app.use("/api/v1/attendance", attendanceRoutes);
+app.use("/api/v1/finance", financeRoutes);
+app.use("/api/v1/lms", lmsRoutes);
+app.use("/api/v1/assignments", assignmentsRoutes);
+app.use("/api/v1/bulletins", bulletinsRoutes);
+app.use("/api/v1/contracts", contractsRoutes);
+app.use("/api/v1/documents", documentsRoutes);
+app.use("/api/v1/communications", communicationsRoutes);
+app.use("/api/v1/corporate", corporateRoutes);
+
+// Iniciar procesos en segundo plano
+startAutoReleaseJob();
 
 // API: Health status check
 app.get("/api/health", (req, res) => {
