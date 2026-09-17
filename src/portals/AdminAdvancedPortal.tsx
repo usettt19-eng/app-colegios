@@ -1,12 +1,33 @@
 import React, { useEffect, useState } from 'react';
-import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2 } from 'lucide-react';
+import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2 } from 'lucide-react';
 
 // Contexto de demostración: en producción tenant_id viene del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = 'tenant-demo-123';
 
 const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-type TabId = 'terms' | 'courses' | 'schedules';
+type TabId = 'terms' | 'courses' | 'schedules' | 'organization';
+
+interface Department {
+  id: string;
+  name: string;
+  profiles?: { first_name: string; last_name: string } | null;
+}
+
+interface StaffMember {
+  id: string;
+  first_name: string;
+  last_name: string;
+  role: string;
+  department_id: string | null;
+  reports_to: string | null;
+  departments?: { name: string } | null;
+}
+
+interface ExitDoor {
+  id: string;
+  name: string;
+}
 
 interface Term {
   id: string;
@@ -46,6 +67,14 @@ export const AdminAdvancedPortal: React.FC = () => {
   const [classForm, setClassForm] = useState({ term_id: '', course_id: '', name: '', capacity: '30' });
   const [scheduleForm, setScheduleForm] = useState({ class_id: '', day_of_week: '1', start_time: '08:00', end_time: '09:00', room_number: '' });
 
+  // --- Organización (departamentos, jerarquía, puertas de salida) ---
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [doors, setDoors] = useState<ExitDoor[]>([]);
+  const [departmentForm, setDepartmentForm] = useState({ name: '', head_id: '' });
+  const [doorForm, setDoorForm] = useState({ name: '' });
+  const [assignForm, setAssignForm] = useState<{ staff_id: string; department_id: string; reports_to: string }>({ staff_id: '', department_id: '', reports_to: '' });
+
   const loadAll = async () => {
     try {
       const [termsRes, coursesRes, classesRes] = await Promise.all([
@@ -64,9 +93,115 @@ export const AdminAdvancedPortal: React.FC = () => {
     }
   };
 
+  const loadOrganization = async () => {
+    try {
+      const [deptRes, staffRes, doorsRes] = await Promise.all([
+        fetch(`/api/v1/hierarchy/departments?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/hierarchy/staff?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/pickup/doors?tenant_id=${DEMO_TENANT_ID}`),
+      ]);
+      const deptData = await deptRes.json();
+      const staffData = await staffRes.json();
+      const doorsData = await doorsRes.json();
+      setDepartments(deptData.departments || []);
+      setStaff(staffData.staff || []);
+      setDoors(doorsData.doors || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+  };
+
   useEffect(() => {
     loadAll();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'organization') loadOrganization();
+  }, [activeTab]);
+
+  const handleCreateDepartment = async () => {
+    if (!departmentForm.name) {
+      setMessage('❌ El nombre del departamento es requerido.');
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/hierarchy/departments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, name: departmentForm.name, head_id: departmentForm.head_id || null }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Departamento creado.');
+        setDepartmentForm({ name: '', head_id: '' });
+        loadOrganization();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo crear el departamento.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setLoading(false);
+  };
+
+  const handleCreateDoor = async () => {
+    if (!doorForm.name) {
+      setMessage('❌ El nombre de la puerta es requerido.');
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/pickup/doors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, name: doorForm.name }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Puerta de salida creada.');
+        setDoorForm({ name: '' });
+        loadOrganization();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo crear la puerta.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setLoading(false);
+  };
+
+  const handleAssignStaff = async () => {
+    if (!assignForm.staff_id) {
+      setMessage('❌ Selecciona un miembro del staff.');
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/hierarchy/staff/${assignForm.staff_id}/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          department_id: assignForm.department_id || null,
+          reports_to: assignForm.reports_to || null,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Estructura jerárquica actualizada.');
+        setAssignForm({ staff_id: '', department_id: '', reports_to: '' });
+        loadOrganization();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo actualizar.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setLoading(false);
+  };
 
   const handleCreateTerm = async () => {
     if (!termForm.name || !termForm.start_date || !termForm.end_date) {
@@ -231,6 +366,12 @@ export const AdminAdvancedPortal: React.FC = () => {
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'schedules' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
           <CalendarClock className="w-4 h-4 mr-2" /> Horarios
+        </button>
+        <button
+          onClick={() => setActiveTab('organization')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'organization' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <Network className="w-4 h-4 mr-2" /> Organización
         </button>
       </div>
 
@@ -450,6 +591,126 @@ export const AdminAdvancedPortal: React.FC = () => {
             {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
             Asignar Bloque de Horario
           </button>
+        </div>
+      )}
+
+      {/* Organización: Departamentos, Jerarquía y Puertas de Salida */}
+      {activeTab === 'organization' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+              <h2 className="font-bold text-slate-700 flex items-center"><Building2 className="w-4 h-4 mr-2 text-rose-600" /> Crear Departamento</h2>
+              <input
+                type="text" placeholder="Nombre (ej. Ciencias, Dirección)" value={departmentForm.name}
+                onChange={e => setDepartmentForm({ ...departmentForm, name: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <input
+                type="text" placeholder="ID de perfil del jefe de departamento (opcional)" value={departmentForm.head_id}
+                onChange={e => setDepartmentForm({ ...departmentForm, head_id: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <button
+                onClick={handleCreateDepartment}
+                disabled={loading}
+                className="flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50 font-semibold"
+              >
+                {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                Crear Departamento
+              </button>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+              <h2 className="font-bold text-slate-700 flex items-center"><DoorOpen className="w-4 h-4 mr-2 text-rose-600" /> Configurar Puerta de Salida</h2>
+              <p className="text-sm text-slate-500">Puertas físicas donde el guardia libera a los alumnos hacia los vehículos (SafeSmartPickup).</p>
+              <input
+                type="text" placeholder="Nombre (ej. Puerta Norte)" value={doorForm.name}
+                onChange={e => setDoorForm({ name: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <button
+                onClick={handleCreateDoor}
+                disabled={loading}
+                className="flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50 font-semibold"
+              >
+                {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                Crear Puerta
+              </button>
+              {doors.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {doors.map(d => (
+                    <span key={d.id} className="px-2 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600">{d.name}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <h2 className="font-bold text-slate-700 flex items-center"><Network className="w-4 h-4 mr-2 text-rose-600" /> Asignar Staff a Departamento / Supervisor</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <select
+                value={assignForm.staff_id}
+                onChange={e => setAssignForm({ ...assignForm, staff_id: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              >
+                <option value="">Selecciona staff</option>
+                {staff.map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name} ({s.role})</option>)}
+              </select>
+              <select
+                value={assignForm.department_id}
+                onChange={e => setAssignForm({ ...assignForm, department_id: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              >
+                <option value="">Sin departamento</option>
+                {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+              <select
+                value={assignForm.reports_to}
+                onChange={e => setAssignForm({ ...assignForm, reports_to: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              >
+                <option value="">Sin supervisor directo</option>
+                {staff.map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>)}
+              </select>
+            </div>
+            <button
+              onClick={handleAssignStaff}
+              disabled={loading}
+              className="flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50 font-semibold"
+            >
+              {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Users2 className="w-4 h-4 mr-2" />}
+              Actualizar Jerarquía
+            </button>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50">
+              <h2 className="font-bold text-slate-700">Organigrama del Staff</h2>
+            </div>
+            {staff.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay staff registrado.</p>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">NOMBRE</th>
+                    <th className="px-4 py-3 font-semibold">ROL</th>
+                    <th className="px-4 py-3 font-semibold">DEPARTAMENTO</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {staff.map(s => (
+                    <tr key={s.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-semibold">{s.first_name} {s.last_name}</td>
+                      <td className="px-4 py-3 text-slate-500">{s.role}</td>
+                      <td className="px-4 py-3 text-slate-500">{s.departments?.name || 'Sin asignar'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
     </div>

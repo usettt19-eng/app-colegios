@@ -1,10 +1,28 @@
 import React, { useEffect, useState } from 'react';
-import { GraduationCap, FileText, CreditCard, FileSignature, CheckCircle, AlertTriangle, Download, Loader2 } from 'lucide-react';
+import { GraduationCap, FileText, CreditCard, FileSignature, CheckCircle, AlertTriangle, Download, Loader2, Car, UserCheck, Plus } from 'lucide-react';
 
 // Contexto de demostración: en producción estos IDs vienen del token JWT de Supabase Auth (Fase 2)
+const DEMO_TENANT_ID = 'tenant-demo-123';
 const DEMO_STUDENT_ID = 'student-demo-123';
+const DEMO_PARENT_ID = 'parent-demo-123';
 
-type TabId = 'grades' | 'bulletins' | 'contracts' | 'payments';
+const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+type TabId = 'grades' | 'bulletins' | 'contracts' | 'payments' | 'pickup';
+
+interface ReplacementRequest {
+  id: string;
+  replacement_name: string;
+  replacement_phone: string;
+  status: string;
+  is_recurring: boolean;
+}
+
+interface CarpoolAuthorization {
+  id: string;
+  day_of_week: number;
+  driver_parent_id: string;
+}
 
 interface ClassEnrollment {
   final_grade: number | null;
@@ -44,6 +62,97 @@ export const ParentStudentPortal: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [payingInvoiceId, setPayingInvoiceId] = useState<string | null>(null);
+
+  // --- Recogida y Carpool ---
+  const [replacements, setReplacements] = useState<ReplacementRequest[]>([]);
+  const [carpoolAuths, setCarpoolAuths] = useState<CarpoolAuthorization[]>([]);
+  const [pickupLoading, setPickupLoading] = useState(false);
+  const [replacementForm, setReplacementForm] = useState({ replacement_name: '', replacement_phone: '', is_recurring: true });
+  const [carpoolForm, setCarpoolForm] = useState({ driver_parent_id: '', day_of_week: '1' });
+
+  const loadPickupData = async () => {
+    try {
+      const [replacementsRes, carpoolRes] = await Promise.all([
+        fetch(`/api/v1/pickup/replacements?tenant_id=${DEMO_TENANT_ID}&parent_id=${DEMO_PARENT_ID}`),
+        fetch(`/api/v1/pickup/carpool/authorizations?tenant_id=${DEMO_TENANT_ID}&student_id=${DEMO_STUDENT_ID}`),
+      ]);
+      const replacementsData = await replacementsRes.json();
+      const carpoolData = await carpoolRes.json();
+      setReplacements(replacementsData.replacements || []);
+      setCarpoolAuths(carpoolData.authorizations || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'pickup') loadPickupData();
+  }, [activeTab]);
+
+  const handleCreateReplacement = async () => {
+    if (!replacementForm.replacement_name || !replacementForm.replacement_phone) {
+      setMessage('❌ Indica el nombre y teléfono de la persona autorizada.');
+      return;
+    }
+    setPickupLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/pickup/replacements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          parent_id: DEMO_PARENT_ID,
+          student_ids: [DEMO_STUDENT_ID],
+          ...replacementForm,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Solicitud de reemplazo enviada, pendiente de aprobación del colegio.');
+        setReplacementForm({ replacement_name: '', replacement_phone: '', is_recurring: true });
+        loadPickupData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo registrar la solicitud.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setPickupLoading(false);
+  };
+
+  const handleCreateCarpool = async () => {
+    if (!carpoolForm.driver_parent_id) {
+      setMessage('❌ Indica el ID del padre que recogerá en carpool.');
+      return;
+    }
+    setPickupLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/pickup/carpool/authorizations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          student_id: DEMO_STUDENT_ID,
+          authorizing_parent_id: DEMO_PARENT_ID,
+          driver_parent_id: carpoolForm.driver_parent_id,
+          day_of_week: Number(carpoolForm.day_of_week),
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Autorización de carpool creada.');
+        setCarpoolForm({ driver_parent_id: '', day_of_week: '1' });
+        loadPickupData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo crear la autorización.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setPickupLoading(false);
+  };
 
   useEffect(() => {
     const loadData = async () => {
@@ -149,6 +258,12 @@ export const ParentStudentPortal: React.FC = () => {
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'payments' ? 'bg-purple-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
           <CreditCard className="w-4 h-4 mr-2" /> Colegiaturas
+        </button>
+        <button
+          onClick={() => setActiveTab('pickup')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'pickup' ? 'bg-purple-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <Car className="w-4 h-4 mr-2" /> Recogida y Carpool
         </button>
       </div>
 
@@ -306,6 +421,106 @@ export const ParentStudentPortal: React.FC = () => {
                   </tbody>
                 </table>
               )}
+            </div>
+          )}
+
+          {activeTab === 'pickup' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
+                  <h2 className="font-bold text-slate-700 flex items-center"><UserCheck className="w-4 h-4 mr-2 text-purple-600" /> Autorizar Reemplazo</h2>
+                  <p className="text-xs text-slate-500">Autoriza a un tercero (que no es padre registrado) a recoger a tu hijo.</p>
+                  <input
+                    type="text" placeholder="Nombre completo" value={replacementForm.replacement_name}
+                    onChange={e => setReplacementForm({ ...replacementForm, replacement_name: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                  <input
+                    type="text" placeholder="Teléfono" value={replacementForm.replacement_phone}
+                    onChange={e => setReplacementForm({ ...replacementForm, replacement_phone: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                  <label className="flex items-center gap-2 text-sm text-slate-600">
+                    <input
+                      type="checkbox" checked={replacementForm.is_recurring}
+                      onChange={e => setReplacementForm({ ...replacementForm, is_recurring: e.target.checked })}
+                    />
+                    Autorización recurrente (no solo por hoy)
+                  </label>
+                  <button
+                    onClick={handleCreateReplacement}
+                    disabled={pickupLoading}
+                    className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 font-semibold text-sm"
+                  >
+                    {pickupLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                    Enviar Solicitud
+                  </button>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
+                  <h2 className="font-bold text-slate-700 flex items-center"><Car className="w-4 h-4 mr-2 text-purple-600" /> Autorizar Carpool</h2>
+                  <p className="text-xs text-slate-500">Autoriza a otro padre registrado a recoger a tu hijo un día fijo de la semana.</p>
+                  <input
+                    type="text" placeholder="ID de perfil del padre conductor" value={carpoolForm.driver_parent_id}
+                    onChange={e => setCarpoolForm({ ...carpoolForm, driver_parent_id: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                  <select
+                    value={carpoolForm.day_of_week}
+                    onChange={e => setCarpoolForm({ ...carpoolForm, day_of_week: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    {DAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+                  </select>
+                  <button
+                    onClick={handleCreateCarpool}
+                    disabled={pickupLoading}
+                    className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 font-semibold text-sm"
+                  >
+                    {pickupLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                    Autorizar Carpool
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="p-4 border-b border-slate-100 bg-slate-50">
+                  <h2 className="font-bold text-slate-700">Reemplazos Autorizados</h2>
+                </div>
+                {replacements.length === 0 ? (
+                  <p className="p-6 text-sm text-slate-400">Aún no has autorizado a nadie más para recoger a tu hijo.</p>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {replacements.map(r => (
+                      <div key={r.id} className="p-4 flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold text-slate-700">{r.replacement_name}</p>
+                          <p className="text-xs text-slate-500">{r.replacement_phone} {r.is_recurring && '· Recurrente'}</p>
+                        </div>
+                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${statusBadge(r.status)}`}>{r.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="p-4 border-b border-slate-100 bg-slate-50">
+                  <h2 className="font-bold text-slate-700">Autorizaciones de Carpool</h2>
+                </div>
+                {carpoolAuths.length === 0 ? (
+                  <p className="p-6 text-sm text-slate-400">Aún no hay autorizaciones de carpool configuradas.</p>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {carpoolAuths.map(c => (
+                      <div key={c.id} className="p-4 flex items-center justify-between text-sm">
+                        <span className="font-semibold text-slate-700">{DAYS[c.day_of_week]}</span>
+                        <span className="text-slate-500 font-mono text-xs">Conductor: {c.driver_parent_id}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </>
