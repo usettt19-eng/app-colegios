@@ -44,6 +44,7 @@ import bulletinsRoutes from "./backend/routes/bulletins";
 import contractsRoutes from "./backend/routes/contracts";
 import documentsRoutes from "./backend/routes/documents";
 import communicationsRoutes from "./backend/routes/communications";
+import messagesRoutes from "./backend/routes/messages";
 import corporateRoutes from "./backend/routes/corporate";
 import { startAutoReleaseJob } from "./backend/jobs/autoRelease";
 
@@ -67,6 +68,7 @@ app.use("/api/v1/bulletins", bulletinsRoutes);
 app.use("/api/v1/contracts", contractsRoutes);
 app.use("/api/v1/documents", documentsRoutes);
 app.use("/api/v1/communications", communicationsRoutes);
+app.use("/api/v1/messages", messagesRoutes);
 app.use("/api/v1/corporate", corporateRoutes);
 
 // Iniciar procesos en segundo plano
