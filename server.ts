@@ -27,6 +27,7 @@ function getGeminiClient(): GoogleGenAI {
 }
 
 import pickupRoutes from "./backend/routes/pickup";
+import webhooksRoutes from "./backend/routes/webhooks";
 import studentsRoutes from "./backend/routes/students";
 import academicsRoutes from "./backend/routes/academics";
 import tenantsRoutes from "./backend/routes/tenants";
@@ -46,6 +47,7 @@ import { startAutoReleaseJob } from "./backend/jobs/autoRelease";
 const app = express();
 app.use(express.json());
 app.use("/api/v1/pickup", pickupRoutes);
+app.use("/api/v1/webhooks", webhooksRoutes);
 app.use("/api/v1/students", studentsRoutes);
 app.use("/api/v1/academics", academicsRoutes);
 app.use("/api/v1/tenants", tenantsRoutes);
