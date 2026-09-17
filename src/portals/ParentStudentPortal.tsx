@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { GraduationCap, FileText, CreditCard, FileSignature, CheckCircle, AlertTriangle, Download, Loader2, Car, UserCheck, Plus, Camera, UserCircle2, BarChart3 } from 'lucide-react';
+import { GraduationCap, FileText, CreditCard, FileSignature, CheckCircle, AlertTriangle, Download, Loader2, Car, UserCheck, Plus, Camera, UserCircle2, BarChart3, CalendarDays } from 'lucide-react';
 import { StudentMedicalRecord } from './StudentMedicalRecord';
 import { ParentDashboard } from './ParentDashboard';
 import { PaymentCenter } from './PaymentCenter';
+import { AgendaCalendar } from './AgendaCalendar';
 import { GuardianInfoForm } from './GuardianInfoForm';
 
 // Contexto de demostración: en producción estos IDs vienen del token JWT de Supabase Auth (Fase 2)
@@ -21,7 +22,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-type TabId = 'dashboard' | 'grades' | 'bulletins' | 'contracts' | 'payments' | 'pickup' | 'profile';
+type TabId = 'dashboard' | 'grades' | 'bulletins' | 'agenda' | 'contracts' | 'payments' | 'pickup' | 'profile';
 
 interface ReplacementRequest {
   id: string;
@@ -387,6 +388,12 @@ export const ParentStudentPortal: React.FC = () => {
           <FileText className="w-4 h-4 mr-2" /> Boletines
         </button>
         <button
+          onClick={() => setActiveTab('agenda')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'agenda' ? 'bg-purple-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <CalendarDays className="w-4 h-4 mr-2" /> Notas y Agendas
+        </button>
+        <button
           onClick={() => setActiveTab('contracts')}
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'contracts' ? 'bg-purple-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
@@ -423,7 +430,7 @@ export const ParentStudentPortal: React.FC = () => {
               tenantId={DEMO_TENANT_ID}
               studentId={DEMO_STUDENT_ID}
               onGoToPayments={() => setActiveTab('payments')}
-              onGoToAgenda={() => setActiveTab('bulletins')}
+              onGoToAgenda={() => setActiveTab('agenda')}
               onGoToGrades={() => setActiveTab('grades')}
             />
           )}
@@ -494,6 +501,8 @@ export const ParentStudentPortal: React.FC = () => {
               )}
             </div>
           )}
+
+          {activeTab === 'agenda' && <AgendaCalendar studentId={DEMO_STUDENT_ID} />}
 
           {activeTab === 'contracts' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">

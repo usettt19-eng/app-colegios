@@ -24,6 +24,47 @@ router.get("/", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/v1/assignments/agenda/:student_id
+// Devuelve tareas/exámenes/actividades de todas las clases en las que el
+// alumno está matriculado, para el calendario "Notas y Agendas" del Portal
+// de Padres. Filtra por rango de fechas opcional (from, to).
+router.get("/agenda/:student_id", async (req: Request, res: Response) => {
+  try {
+    const { student_id } = req.params;
+    const { from, to } = req.query;
+
+    const { data: enrollments } = await supabaseAdmin
+      .from("enrollments")
+      .select("id, class_enrollments(class_id)")
+      .eq("student_id", student_id);
+
+    const classIds = (enrollments || [])
+      .flatMap((e: any) => e.class_enrollments || [])
+      .map((ce: any) => ce.class_id)
+      .filter(Boolean);
+
+    if (classIds.length === 0) return res.status(200).json({ success: true, agenda: [] });
+
+    let query = supabaseAdmin
+      .from("assignments")
+      .select("id, title, description, due_date, type, max_score, classes(name, courses(name))")
+      .in("class_id", classIds)
+      .eq("is_published", true)
+      .order("due_date");
+
+    if (from) query = query.gte("due_date", String(from));
+    if (to) query = query.lte("due_date", String(to));
+
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ error: "Error al consultar la agenda." });
+
+    return res.status(200).json({ success: true, agenda: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/assignments/agenda/:student_id:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // GET /api/v1/assignments/:id/submissions
 // Lista las entregas de los alumnos para una tarea (para calificar)
 router.get("/:id/submissions", async (req: Request, res: Response) => {
@@ -47,7 +88,7 @@ router.get("/:id/submissions", async (req: Request, res: Response) => {
 // El profesor crea una nueva tarea para una clase
 router.post("/", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, class_id, teacher_id, title, description, due_date, max_score } = req.body;
+    const { tenant_id, class_id, teacher_id, title, description, due_date, max_score, type } = req.body;
 
     if (!tenant_id || !class_id || !teacher_id || !title || !due_date) {
       return res.status(400).json({ error: "Faltan parámetros requeridos para crear la tarea." });
@@ -63,7 +104,8 @@ router.post("/", async (req: Request, res: Response) => {
         title,
         description,
         due_date,
-        max_score: max_score || 100
+        max_score: max_score || 100,
+        type: type || "tarea"
       })
       .select()
       .single();

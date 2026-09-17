@@ -24,6 +24,7 @@ CREATE TABLE public.assignments (
     
     due_date TIMESTAMPTZ NOT NULL,
     max_score DECIMAL(5,2) DEFAULT 100.00,
+    type TEXT NOT NULL DEFAULT 'tarea' CHECK (type IN ('tarea', 'examen', 'actividad', 'proyecto')), -- Para el calendario "Notas y Agendas"
     
     is_published BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT now(),
@@ -52,6 +53,7 @@ CREATE TABLE public.student_assignments (
 -- ÍNDICES PARA RENDIMIENTO
 -- ==========================================
 CREATE INDEX idx_assignments_class ON public.assignments(class_id);
+CREATE INDEX idx_assignments_due_date ON public.assignments(due_date);
 CREATE INDEX idx_student_assignments_student ON public.student_assignments(student_id, status);
 
 -- ==========================================
