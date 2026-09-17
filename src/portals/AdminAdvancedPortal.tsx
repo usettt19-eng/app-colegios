@@ -1,12 +1,30 @@
 import React, { useEffect, useState } from 'react';
-import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2 } from 'lucide-react';
+import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2, History, Bell, Send, Radio } from 'lucide-react';
 
 // Contexto de demostración: en producción tenant_id viene del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = 'tenant-demo-123';
+const DEMO_SENDER_ID = 'staff-demo-123';
 
 const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-type TabId = 'terms' | 'courses' | 'schedules' | 'organization';
+type TabId = 'terms' | 'courses' | 'schedules' | 'organization' | 'audit' | 'communications';
+
+interface AuditLog {
+  id: string;
+  event_type: string;
+  description: string;
+  actor_name: string | null;
+  created_at: string;
+}
+
+interface SystemNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: string;
+  is_read: boolean;
+  created_at: string;
+}
 
 interface Department {
   id: string;
@@ -75,6 +93,17 @@ export const AdminAdvancedPortal: React.FC = () => {
   const [doorForm, setDoorForm] = useState({ name: '' });
   const [assignForm, setAssignForm] = useState<{ staff_id: string; department_id: string; reports_to: string }>({ staff_id: '', department_id: '', reports_to: '' });
 
+  // --- Auditoría y Notificaciones ---
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [notifications, setNotifications] = useState<SystemNotification[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  // --- Comunicaciones y LMS ---
+  const [commsLoading, setCommsLoading] = useState(false);
+  const [broadcastForm, setBroadcastForm] = useState({ subject: '', html_body: '' });
+  const [internalForm, setInternalForm] = useState({ target_audience: 'all_staff', subject: '', html_body: '' });
+  const [lmsForm, setLmsForm] = useState({ class_id: '', lms_provider: 'Google Classroom', lms_course_id: '' });
+
   const loadAll = async () => {
     try {
       const [termsRes, coursesRes, classesRes] = await Promise.all([
@@ -111,12 +140,107 @@ export const AdminAdvancedPortal: React.FC = () => {
     }
   };
 
+  const loadAudit = async () => {
+    setAuditLoading(true);
+    try {
+      const [auditRes, notifRes] = await Promise.all([
+        fetch(`/api/v1/system/audit-logs?tenant_id=${DEMO_TENANT_ID}&limit=50`),
+        fetch(`/api/v1/system/notifications?tenant_id=${DEMO_TENANT_ID}&limit=50`),
+      ]);
+      const auditData = await auditRes.json();
+      const notifData = await notifRes.json();
+      setAuditLogs(auditData.auditLogs || []);
+      setNotifications(notifData.notifications || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+    setAuditLoading(false);
+  };
+
+  const handleBroadcast = async () => {
+    if (!broadcastForm.subject || !broadcastForm.html_body) {
+      setMessage('❌ Completa el asunto y el mensaje del comunicado.');
+      return;
+    }
+    setCommsLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/communications/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, sender_id: DEMO_SENDER_ID, ...broadcastForm }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ ' + data.message);
+        setBroadcastForm({ subject: '', html_body: '' });
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo enviar el comunicado.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setCommsLoading(false);
+  };
+
+  const handleInternalMessage = async () => {
+    if (!internalForm.subject || !internalForm.html_body) {
+      setMessage('❌ Completa el asunto y el mensaje interno.');
+      return;
+    }
+    setCommsLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/communications/internal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, sender_id: DEMO_SENDER_ID, sender_role: 'admin', ...internalForm }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ ' + data.message);
+        setInternalForm({ target_audience: 'all_staff', subject: '', html_body: '' });
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo enviar el mensaje interno.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setCommsLoading(false);
+  };
+
+  const handleLmsSync = async () => {
+    if (!lmsForm.class_id) {
+      setMessage('❌ Indica el ID de la clase a sincronizar.');
+      return;
+    }
+    setCommsLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/lms/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, ...lmsForm }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage(`✅ ${data.message} (${data.details?.recordsSynced ?? 0} registros sincronizados)`);
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo sincronizar con el LMS.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setCommsLoading(false);
+  };
+
   useEffect(() => {
     loadAll();
   }, []);
 
   useEffect(() => {
     if (activeTab === 'organization') loadOrganization();
+    if (activeTab === 'audit') loadAudit();
   }, [activeTab]);
 
   const handleCreateDepartment = async () => {
@@ -372,6 +496,18 @@ export const AdminAdvancedPortal: React.FC = () => {
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'organization' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
           <Network className="w-4 h-4 mr-2" /> Organización
+        </button>
+        <button
+          onClick={() => setActiveTab('audit')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'audit' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <History className="w-4 h-4 mr-2" /> Auditoría
+        </button>
+        <button
+          onClick={() => setActiveTab('communications')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'communications' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <Radio className="w-4 h-4 mr-2" /> Comunicaciones y LMS
         </button>
       </div>
 
@@ -710,6 +846,166 @@ export const AdminAdvancedPortal: React.FC = () => {
                 </tbody>
               </table>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Auditoría y Notificaciones */}
+      {activeTab === 'audit' && (
+        <div className="space-y-6">
+          {auditLoading && (
+            <div className="flex items-center justify-center py-6 text-slate-400">
+              <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Cargando bitácora...
+            </div>
+          )}
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center">
+              <History className="w-4 h-4 mr-2 text-rose-600" />
+              <h2 className="font-bold text-slate-700">Bitácora de Auditoría</h2>
+            </div>
+            {auditLogs.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay eventos registrados.</p>
+            ) : (
+              <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+                {auditLogs.map(log => (
+                  <div key={log.id} className="p-4 text-sm">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600">{log.event_type}</span>
+                      <span className="text-xs text-slate-400">{new Date(log.created_at).toLocaleString()}</span>
+                    </div>
+                    <p className="text-slate-700">{log.description}</p>
+                    {log.actor_name && <p className="text-xs text-slate-400 mt-0.5">Actor: {log.actor_name}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center">
+              <Bell className="w-4 h-4 mr-2 text-rose-600" />
+              <h2 className="font-bold text-slate-700">Notificaciones Generadas</h2>
+            </div>
+            {notifications.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay notificaciones generadas.</p>
+            ) : (
+              <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+                {notifications.map(n => (
+                  <div key={n.id} className="p-4 text-sm flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-slate-700">{n.title}</p>
+                      <p className="text-slate-500">{n.message}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{new Date(n.created_at).toLocaleString()}</p>
+                    </div>
+                    <span className={`px-2 py-1 rounded-full text-xs font-bold shrink-0 ${
+                      n.type === 'success' ? 'bg-emerald-100 text-emerald-700' :
+                      n.type === 'error' ? 'bg-rose-100 text-rose-700' :
+                      n.type === 'warn' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'
+                    }`}>{n.type}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Comunicaciones y LMS */}
+      {activeTab === 'communications' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-3">
+              <h2 className="font-bold text-slate-700 flex items-center"><Send className="w-4 h-4 mr-2 text-rose-600" /> Comunicado Masivo a Padres</h2>
+              <input
+                type="text" placeholder="Asunto" value={broadcastForm.subject}
+                onChange={e => setBroadcastForm({ ...broadcastForm, subject: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <textarea
+                placeholder="Mensaje (HTML permitido)" value={broadcastForm.html_body}
+                onChange={e => setBroadcastForm({ ...broadcastForm, html_body: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                rows={4}
+              />
+              <button
+                onClick={handleBroadcast}
+                disabled={commsLoading}
+                className="flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50 font-semibold text-sm"
+              >
+                {commsLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+                Enviar a Todos los Padres
+              </button>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-3">
+              <h2 className="font-bold text-slate-700 flex items-center"><Users2 className="w-4 h-4 mr-2 text-rose-600" /> Mensaje Interno al Staff</h2>
+              <select
+                value={internalForm.target_audience}
+                onChange={e => setInternalForm({ ...internalForm, target_audience: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              >
+                <option value="all_staff">Todo el Staff</option>
+                <option value="all_teachers">Solo Docentes</option>
+                <option value="department_only">Un Departamento</option>
+                <option value="direct_reports">Mis Reportes Directos</option>
+              </select>
+              <input
+                type="text" placeholder="Asunto" value={internalForm.subject}
+                onChange={e => setInternalForm({ ...internalForm, subject: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <textarea
+                placeholder="Mensaje" value={internalForm.html_body}
+                onChange={e => setInternalForm({ ...internalForm, html_body: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                rows={4}
+              />
+              <button
+                onClick={handleInternalMessage}
+                disabled={commsLoading}
+                className="flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50 font-semibold text-sm"
+              >
+                {commsLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+                Enviar Mensaje Interno
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-3">
+            <h2 className="font-bold text-slate-700 flex items-center"><Radio className="w-4 h-4 mr-2 text-rose-600" /> Sincronización con LMS (Canvas / Google Classroom)</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <select
+                value={lmsForm.class_id}
+                onChange={e => setLmsForm({ ...lmsForm, class_id: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              >
+                <option value="">Selecciona la clase</option>
+                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <select
+                value={lmsForm.lms_provider}
+                onChange={e => setLmsForm({ ...lmsForm, lms_provider: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              >
+                <option>Google Classroom</option>
+                <option>Canvas</option>
+                <option>Moodle</option>
+              </select>
+              <input
+                type="text" placeholder="ID del curso en el LMS" value={lmsForm.lms_course_id}
+                onChange={e => setLmsForm({ ...lmsForm, lms_course_id: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+            <button
+              onClick={handleLmsSync}
+              disabled={commsLoading}
+              className="flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50 font-semibold text-sm"
+            >
+              {commsLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Radio className="w-4 h-4 mr-2" />}
+              Sincronizar Calificaciones
+            </button>
           </div>
         </div>
       )}
