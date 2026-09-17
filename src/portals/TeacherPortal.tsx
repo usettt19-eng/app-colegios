@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Calendar, CheckSquare, AlertTriangle, Send, BookOpen, Plus, Loader2, ClipboardCheck } from 'lucide-react';
 
 // Contexto de demostración: en producción estos IDs vienen del token JWT de Supabase Auth (Fase 2)
-const DEMO_TENANT_ID = 'tenant-demo-123';
-const DEMO_TEACHER_ID = 'teacher-demo-123';
+const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
+const DEMO_TEACHER_ID = '44444444-4444-4444-4444-444444444444';
 
 type TabId = 'attendance' | 'assignments';
 

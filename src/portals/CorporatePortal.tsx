@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Package, Monitor, Briefcase, TrendingDown, Plus, CheckCircle, Laptop, PenTool, HardDrive, Wallet, Users, Calculator, Loader2, Truck, ShoppingCart } from 'lucide-react';
 
 // Contexto de demostración: en producción tenant_id / requested_by vienen del token JWT de Supabase Auth (Fase 2)
-const DEMO_TENANT_ID = 'tenant-demo-123';
-const DEMO_REQUESTER_ID = 'staff-demo-123';
+const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
+const DEMO_REQUESTER_ID = '66666666-6666-6666-6666-666666666666';
 
 interface FixedAsset {
   id: string;

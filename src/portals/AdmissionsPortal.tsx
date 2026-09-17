@@ -11,9 +11,9 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 // Contexto de demostración: en producción tenant_id/parent_id vienen del token JWT de Supabase Auth (Fase 2)
-const DEMO_TENANT_ID = 'tenant-demo-123';
-const DEMO_PARENT_ID = 'parent-demo-123';
-const DEMO_TERM_ID = 'term-demo-123';
+const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
+const DEMO_PARENT_ID = '33333333-3333-3333-3333-333333333333';
+const DEMO_TERM_ID = '55555555-5555-5555-5555-555555555555';
 
 type StepId = 1 | 2 | 3 | 4;
 
@@ -139,7 +139,7 @@ export const AdmissionsPortal: React.FC = () => {
             tenant_id: DEMO_TENANT_ID,
             student_id: studentId,
             parent_id: DEMO_PARENT_ID,
-            template_id: 'template-demo-123',
+            template_id: '77777777-7777-7777-7777-777777777777',
             enrollment_id: data.enrollment.id,
           }),
         });

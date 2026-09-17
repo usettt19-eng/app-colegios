@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2, History, Bell, Send, Radio } from 'lucide-react';
 
 // Contexto de demostración: en producción tenant_id viene del token JWT de Supabase Auth (Fase 2)
-const DEMO_TENANT_ID = 'tenant-demo-123';
-const DEMO_SENDER_ID = 'staff-demo-123';
+const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
+const DEMO_SENDER_ID = '66666666-6666-6666-6666-666666666666';
 
 const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 

@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { GraduationCap, FileText, CreditCard, FileSignature, CheckCircle, AlertTriangle, Download, Loader2, Car, UserCheck, Plus, Camera, UserCircle2 } from 'lucide-react';
 
 // Contexto de demostración: en producción estos IDs vienen del token JWT de Supabase Auth (Fase 2)
-const DEMO_TENANT_ID = 'tenant-demo-123';
-const DEMO_STUDENT_ID = 'student-demo-123';
-const DEMO_PARENT_ID = 'parent-demo-123';
+const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
+const DEMO_STUDENT_ID = '22222222-2222-2222-2222-222222222222';
+const DEMO_PARENT_ID = '33333333-3333-3333-3333-333333333333';
 
 const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
