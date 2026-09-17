@@ -5,6 +5,30 @@ import { createYappyCheckout } from "../services/yappyService";
 
 const router = Router();
 
+// GET /api/v1/finance/invoices/:student_id
+// Lista las facturas de colegiatura de un alumno (usado por el Portal de Padres)
+router.get("/invoices/:student_id", async (req: Request, res: Response) => {
+  try {
+    const { student_id } = req.params;
+
+    const { data, error } = await supabaseAdmin
+      .from("invoices")
+      .select("*, invoice_line_items(description, quantity, unit_price, discount)")
+      .eq("student_id", student_id)
+      .order("due_date", { ascending: false });
+
+    if (error) {
+      console.error("Error al consultar facturas:", error);
+      return res.status(500).json({ error: "Error al consultar las facturas." });
+    }
+
+    return res.status(200).json({ success: true, invoices: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/finance/invoices/:student_id:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // POST /api/v1/finance/checkout/yappy
 // Inicia el flujo de pago a través de Yappy (Banco General Panamá)
 router.post("/checkout/yappy", async (req: Request, res: Response) => {

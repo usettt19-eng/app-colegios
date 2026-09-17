@@ -3,6 +3,31 @@ import { supabaseAdmin } from "../supabase";
 
 const router = Router();
 
+// GET /api/v1/bulletins/:student_id
+// Lista los boletines publicados de un alumno (usado por el Portal de Padres)
+router.get("/:student_id", async (req: Request, res: Response) => {
+  try {
+    const { student_id } = req.params;
+
+    const { data, error } = await supabaseAdmin
+      .from("report_cards")
+      .select("*, academic_terms(name), report_card_details(final_score, classes(name))")
+      .eq("student_id", student_id)
+      .eq("is_published", true)
+      .order("published_at", { ascending: false });
+
+    if (error) {
+      console.error("Error al consultar boletines:", error);
+      return res.status(500).json({ error: "Error al consultar los boletines." });
+    }
+
+    return res.status(200).json({ success: true, reportCards: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/bulletins/:student_id:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // POST /api/v1/bulletins/generate
 // Función que calcula promedios y genera el boletín de fin de ciclo para un alumno
 router.post("/generate", async (req: Request, res: Response) => {
