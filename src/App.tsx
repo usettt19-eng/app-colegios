@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Network, Database, Globe, Layers, Users, Cpu, ShieldCheck, HelpCircle, Server, FileCode, CheckCircle2, UserCircle, Briefcase, GraduationCap } from "lucide-react";
+import { Network, Database, Globe, Layers, Users, Cpu, ShieldCheck, HelpCircle, Server, FileCode, CheckCircle2, UserCircle, Briefcase, GraduationCap, ClipboardList } from "lucide-react";
 import ArchitectureVisualizer from "./components/ArchitectureVisualizer";
 import DatabaseSchemaExplorer from "./components/DatabaseSchemaExplorer";
 import APIPlayground from "./components/APIPlayground";
@@ -9,8 +9,9 @@ import AIAdvisor from "./components/AIAdvisor";
 import { TeacherPortal } from "./portals/TeacherPortal";
 import { CorporatePortal } from "./portals/CorporatePortal";
 import { ParentStudentPortal } from "./portals/ParentStudentPortal";
+import { AdmissionsPortal } from "./portals/AdmissionsPortal";
 
-type TabId = "diagram" | "database" | "api" | "modules" | "portals" | "ai_advisor" | "teacher_real" | "corporate_real" | "parent_real";
+type TabId = "diagram" | "database" | "api" | "modules" | "portals" | "ai_advisor" | "teacher_real" | "corporate_real" | "parent_real" | "admissions_real";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>("diagram");
@@ -108,6 +109,19 @@ export default function App() {
             VER PORTAL PADRES
           </button>
 
+          {/* Admissions Portal */}
+          <button
+            onClick={() => setActiveTab("admissions_real")}
+            className={`px-4 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all duration-200 shrink-0 cursor-pointer ${
+              activeTab === "admissions_real"
+                ? "bg-teal-600 text-white shadow-lg shadow-teal-600/15"
+                : "text-teal-400 hover:text-teal-200 hover:bg-slate-800/40 border border-teal-900/30"
+            }`}
+          >
+            <ClipboardList className="w-4 h-4" />
+            VER PORTAL ADMISIONES
+          </button>
+
           <button
             onClick={() => setActiveTab("database")}
             className={`px-4 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all duration-200 shrink-0 cursor-pointer ${
@@ -164,6 +178,11 @@ export default function App() {
           {activeTab === "parent_real" && (
             <div className="bg-slate-50 rounded-xl overflow-hidden min-h-[600px]">
               <ParentStudentPortal />
+            </div>
+          )}
+          {activeTab === "admissions_real" && (
+            <div className="bg-slate-50 rounded-xl overflow-hidden min-h-[600px]">
+              <AdmissionsPortal />
             </div>
           )}
         </div>

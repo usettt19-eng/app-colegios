@@ -3,6 +3,30 @@ import { supabaseAdmin } from "../supabase";
 
 const router = Router();
 
+// GET /api/v1/documents/:student_id
+// Lista los documentos del expediente de un alumno (usado por Admisiones y el Portal de Padres)
+router.get("/:student_id", async (req: Request, res: Response) => {
+  try {
+    const { student_id } = req.params;
+
+    const { data, error } = await supabaseAdmin
+      .from("student_documents")
+      .select("*")
+      .eq("student_id", student_id)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error al consultar documentos:", error);
+      return res.status(500).json({ error: "Error al consultar los documentos." });
+    }
+
+    return res.status(200).json({ success: true, documents: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/documents/:student_id:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // POST /api/v1/documents/upload
 // Endpoint para que los padres o secretaria suban los documentos requeridos (ej. notas colegio anterior)
 router.post("/upload", async (req: Request, res: Response) => {
