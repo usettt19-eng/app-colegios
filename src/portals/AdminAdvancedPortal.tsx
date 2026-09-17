@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2, History, Bell, Send, Radio } from 'lucide-react';
+import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2, History, Bell, Send, Radio, DollarSign, X } from 'lucide-react';
 
 // Contexto de demostración: en producción tenant_id viene del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -7,7 +7,7 @@ const DEMO_SENDER_ID = '66666666-6666-6666-6666-666666666666';
 
 const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-type TabId = 'terms' | 'courses' | 'schedules' | 'organization' | 'audit' | 'communications';
+type TabId = 'terms' | 'courses' | 'schedules' | 'costs' | 'organization' | 'audit' | 'communications';
 
 interface AuditLog {
   id: string;
@@ -71,6 +71,19 @@ interface ClassGroup {
   academic_terms?: { name: string };
 }
 
+interface FeeSchedule {
+  id: string;
+  grade: string;
+  concept: string;
+  description: string | null;
+  amount: number;
+  currency: string;
+  recurrence: 'mensual' | 'anual' | 'unico';
+  due_day: number | null;
+  accounting_code: string | null;
+  is_active: boolean;
+}
+
 export const AdminAdvancedPortal: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('terms');
   const [message, setMessage] = useState('');
@@ -84,6 +97,14 @@ export const AdminAdvancedPortal: React.FC = () => {
   const [courseForm, setCourseForm] = useState({ code: '', name: '', credits: '' });
   const [classForm, setClassForm] = useState({ term_id: '', course_id: '', name: '', capacity: '30' });
   const [scheduleForm, setScheduleForm] = useState({ class_id: '', day_of_week: '1', start_time: '08:00', end_time: '09:00', room_number: '' });
+
+  // --- Costos (Tabla de Cargos por Grado) ---
+  const [feeSchedules, setFeeSchedules] = useState<FeeSchedule[]>([]);
+  const [feeScheduleGradeFilter, setFeeScheduleGradeFilter] = useState('');
+  const [feeScheduleForm, setFeeScheduleForm] = useState({
+    grade: '', concept: '', description: '', amount: '', recurrence: 'unico' as FeeSchedule['recurrence'], due_day: '5', accounting_code: '',
+  });
+  const [feeSchedulesLoading, setFeeSchedulesLoading] = useState(false);
 
   // --- Organización (departamentos, jerarquía, puertas de salida) ---
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -238,10 +259,75 @@ export const AdminAdvancedPortal: React.FC = () => {
     loadAll();
   }, []);
 
+  const loadFeeSchedules = async () => {
+    setFeeSchedulesLoading(true);
+    try {
+      const response = await fetch(`/api/v1/finance/fee-schedules?tenant_id=${DEMO_TENANT_ID}`);
+      const data = await response.json();
+      setFeeSchedules(data.feeSchedules || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+    setFeeSchedulesLoading(false);
+  };
+
   useEffect(() => {
     if (activeTab === 'organization') loadOrganization();
     if (activeTab === 'audit') loadAudit();
+    if (activeTab === 'costs') loadFeeSchedules();
   }, [activeTab]);
+
+  const handleCreateFeeSchedule = async () => {
+    if (!feeScheduleForm.grade || !feeScheduleForm.concept || !feeScheduleForm.amount) {
+      setMessage('❌ Completa grado, concepto y monto del cargo.');
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/finance/fee-schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          grade: feeScheduleForm.grade,
+          concept: feeScheduleForm.concept,
+          description: feeScheduleForm.description || null,
+          amount: Number(feeScheduleForm.amount),
+          currency: 'USD',
+          recurrence: feeScheduleForm.recurrence,
+          due_day: feeScheduleForm.recurrence === 'mensual' ? Number(feeScheduleForm.due_day) : null,
+          accounting_code: feeScheduleForm.accounting_code || null,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Cargo agregado a la tabla de costos.');
+        setFeeScheduleForm({ grade: feeScheduleForm.grade, concept: '', description: '', amount: '', recurrence: 'unico', due_day: '5', accounting_code: '' });
+        loadFeeSchedules();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo crear el cargo.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setLoading(false);
+  };
+
+  const handleDeleteFeeSchedule = async (id: string) => {
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/finance/fee-schedules/${id}`, { method: 'DELETE' });
+      const data = await response.json();
+      if (data.success) {
+        setFeeSchedules(prev => prev.filter(fs => fs.id !== id));
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo eliminar el cargo.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
 
   const handleCreateDepartment = async () => {
     if (!departmentForm.name) {
@@ -492,6 +578,12 @@ export const AdminAdvancedPortal: React.FC = () => {
           <CalendarClock className="w-4 h-4 mr-2" /> Horarios
         </button>
         <button
+          onClick={() => setActiveTab('costs')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'costs' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <DollarSign className="w-4 h-4 mr-2" /> Costos
+        </button>
+        <button
           onClick={() => setActiveTab('organization')}
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'organization' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
@@ -727,6 +819,158 @@ export const AdminAdvancedPortal: React.FC = () => {
             {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
             Asignar Bloque de Horario
           </button>
+        </div>
+      )}
+
+      {/* Costos: Tabla de Cargos por Grado */}
+      {activeTab === 'costs' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <h2 className="font-bold text-slate-700 flex items-center"><Plus className="w-4 h-4 mr-2 text-rose-600" /> Agregar Cargo</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input
+                type="text" placeholder="Grado (ej. 5to Primaria)" value={feeScheduleForm.grade}
+                onChange={e => setFeeScheduleForm({ ...feeScheduleForm, grade: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <input
+                type="text" placeholder="Concepto (ej. Matrícula)" value={feeScheduleForm.concept}
+                onChange={e => setFeeScheduleForm({ ...feeScheduleForm, concept: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <input
+                type="number" placeholder="Costo (USD)" value={feeScheduleForm.amount}
+                onChange={e => setFeeScheduleForm({ ...feeScheduleForm, amount: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <select
+                value={feeScheduleForm.recurrence}
+                onChange={e => setFeeScheduleForm({ ...feeScheduleForm, recurrence: e.target.value as FeeSchedule['recurrence'] })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              >
+                <option value="unico">Único (Inscripción)</option>
+                <option value="mensual">Mensual (Cuota)</option>
+                <option value="anual">Anual (Anualidad)</option>
+              </select>
+              {feeScheduleForm.recurrence === 'mensual' && (
+                <input
+                  type="number" placeholder="Día de vencimiento" value={feeScheduleForm.due_day}
+                  onChange={e => setFeeScheduleForm({ ...feeScheduleForm, due_day: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                />
+              )}
+              <input
+                type="text" placeholder="Código contable (opcional)" value={feeScheduleForm.accounting_code}
+                onChange={e => setFeeScheduleForm({ ...feeScheduleForm, accounting_code: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+            <button
+              onClick={handleCreateFeeSchedule}
+              disabled={loading}
+              className="flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50 font-semibold"
+            >
+              {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+              Agregar Cargo
+            </button>
+          </div>
+
+          {(() => {
+            const grades = Array.from(new Set(feeSchedules.map(fs => fs.grade))).sort();
+            const visible = feeScheduleGradeFilter ? feeSchedules.filter(fs => fs.grade === feeScheduleGradeFilter) : feeSchedules;
+            const totalInscripcion = visible.filter(fs => fs.recurrence === 'unico').reduce((s, fs) => s + Number(fs.amount), 0);
+            const totalAnualidad = visible.filter(fs => fs.recurrence === 'anual').reduce((s, fs) => s + Number(fs.amount), 0);
+            const totalCuota = visible.filter(fs => fs.recurrence === 'mensual').reduce((s, fs) => s + Number(fs.amount), 0);
+
+            return (
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-3 flex-wrap">
+                  <h2 className="font-bold text-slate-700">Listado de Costos</h2>
+                  {grades.length > 0 && (
+                    <select
+                      value={feeScheduleGradeFilter}
+                      onChange={e => setFeeScheduleGradeFilter(e.target.value)}
+                      className="border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                    >
+                      <option value="">Todos los grados</option>
+                      {grades.map(g => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                  )}
+                </div>
+
+                {feeSchedulesLoading ? (
+                  <div className="flex items-center justify-center py-12 text-slate-400">
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Cargando tabla de costos...
+                  </div>
+                ) : visible.length === 0 ? (
+                  <p className="p-6 text-sm text-slate-400">Aún no hay cargos configurados{feeScheduleGradeFilter ? ` para ${feeScheduleGradeFilter}` : ''}.</p>
+                ) : (
+                  <>
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                        <tr>
+                          <th className="px-4 py-3 font-semibold w-10">#</th>
+                          <th className="px-4 py-3 font-semibold">DESCRIPCIÓN</th>
+                          <th className="px-4 py-3 font-semibold">GRADO</th>
+                          <th className="px-4 py-3 font-semibold">COSTO</th>
+                          <th className="px-4 py-3 font-semibold text-center">OPCIONES</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {visible.map((fs, i) => (
+                          <tr key={fs.id} className="hover:bg-slate-50">
+                            <td className="px-4 py-3 text-slate-400">{i + 1}</td>
+                            <td className="px-4 py-3">
+                              <p className="font-semibold text-slate-700">{fs.concept.toUpperCase()}</p>
+                              {fs.description && <p className="text-xs text-slate-400">{fs.description}</p>}
+                            </td>
+                            <td className="px-4 py-3 text-slate-500">{fs.grade}</td>
+                            <td className="px-4 py-3 font-semibold text-slate-700">{Number(fs.amount).toFixed(2)}</td>
+                            <td className="px-4 py-3 text-center">
+                              <button
+                                onClick={() => handleDeleteFeeSchedule(fs.id)}
+                                className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 p-1 rounded"
+                                title="Eliminar cargo"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      {feeScheduleGradeFilter && (
+                        <tfoot>
+                          <tr className="border-t-2 border-slate-200 bg-slate-50">
+                            <td className="px-4 py-3" />
+                            <td className="px-4 py-3 font-bold text-blue-700">TOTAL DE INSCRIPCIÓN</td>
+                            <td className="px-4 py-3" />
+                            <td className="px-4 py-3 font-bold text-blue-700">{totalInscripcion.toFixed(2)}</td>
+                            <td className="px-4 py-3" />
+                          </tr>
+                          <tr className="bg-slate-50">
+                            <td className="px-4 py-3" />
+                            <td className="px-4 py-3 font-bold text-blue-700">ANUALIDAD</td>
+                            <td className="px-4 py-3" />
+                            <td className="px-4 py-3 font-bold text-blue-700">{totalAnualidad.toFixed(2)}</td>
+                            <td className="px-4 py-3" />
+                          </tr>
+                          <tr className="bg-slate-50">
+                            <td className="px-4 py-3" />
+                            <td className="px-4 py-3 font-bold text-blue-700">CUOTA</td>
+                            <td className="px-4 py-3" />
+                            <td className="px-4 py-3 font-bold text-blue-700">{totalCuota.toFixed(2)}</td>
+                            <td className="px-4 py-3" />
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 

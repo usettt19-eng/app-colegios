@@ -83,6 +83,25 @@ router.patch("/fee-schedules/:id", async (req: Request, res: Response) => {
   }
 });
 
+// DELETE /api/v1/finance/fee-schedules/:id
+// Elimina un cargo de la tabla de costos (botón "X" del listado)
+router.delete("/fee-schedules/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const { error } = await supabaseAdmin.from("fee_schedules").delete().eq("id", id);
+    if (error) {
+      console.error("Error al eliminar cargo:", error);
+      return res.status(500).json({ error: "No se pudo eliminar el cargo." });
+    }
+
+    return res.status(200).json({ success: true, message: "Cargo eliminado." });
+  } catch (error: any) {
+    console.error("Error en DELETE /api/v1/finance/fee-schedules/:id:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // POST /api/v1/finance/generate-invoices
 // Genera las facturas del periodo (ej. "2026-09") a partir de la tabla de
 // cargos activa: por cada cargo, busca los alumnos matriculados en ese
