@@ -1,6 +1,10 @@
 services:
   sis-colegios:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
     container_name: sis-colegios
     restart: unless-stopped
     ports:
