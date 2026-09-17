@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Package, Monitor, Briefcase, TrendingDown, Plus, CheckCircle, Search, Laptop, PenTool, HardDrive } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Package, Monitor, Briefcase, TrendingDown, Plus, CheckCircle, Search, Laptop, PenTool, HardDrive, Wallet, Users, Calculator, Loader2 } from 'lucide-react';
 
 const MOCK_ASSETS = [
   { id: '1', tag: 'IT-2026-001', name: 'MacBook Air M2', condition: 'Nuevo', assignedTo: 'Sin asignar' },
@@ -12,9 +12,160 @@ const MOCK_CONSUMABLES = [
   { id: '3', name: 'Tinta Impresora Negra', stock: 3, unitCost: 25.00 }, // Low stock
 ];
 
+// Contexto de demostración: en producción tenant_id viene del token JWT de Supabase Auth (Fase 2)
+const DEMO_TENANT_ID = 'tenant-demo-123';
+
+interface Employee {
+  id: string;
+  hire_date: string;
+  base_salary: number;
+  status: string;
+  profiles?: { first_name: string; last_name: string; role: string };
+}
+
+interface PayrollRun {
+  id: string;
+  period_start: string;
+  period_end: string;
+  total_amount: number;
+  status: string;
+}
+
+interface Paystub {
+  id: string;
+  gross_pay: number;
+  deductions: number;
+  net_pay: number;
+  status: string;
+  hr_employees?: { profiles?: { first_name: string; last_name: string } };
+}
+
 export const CorporatePortal: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'assets' | 'consumables'>('assets');
+  const [activeTab, setActiveTab] = useState<'assets' | 'consumables' | 'payroll'>('assets');
   const [message, setMessage] = useState('');
+
+  // --- Nómina ---
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [payrollRuns, setPayrollRuns] = useState<PayrollRun[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [paystubs, setPaystubs] = useState<Paystub[]>([]);
+  const [payrollLoading, setPayrollLoading] = useState(false);
+
+  const [employeeForm, setEmployeeForm] = useState({ profile_id: '', hire_date: '', base_salary: '' });
+  const [runForm, setRunForm] = useState({ period_start: '', period_end: '' });
+  const [deductionRate, setDeductionRate] = useState('12');
+
+  const loadPayrollData = async () => {
+    try {
+      const [employeesRes, runsRes] = await Promise.all([
+        fetch(`/api/v1/corporate/employees?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/corporate/payroll/runs?tenant_id=${DEMO_TENANT_ID}`),
+      ]);
+      const employeesData = await employeesRes.json();
+      const runsData = await runsRes.json();
+      setEmployees(employeesData.employees || []);
+      setPayrollRuns(runsData.runs || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'payroll') loadPayrollData();
+  }, [activeTab]);
+
+  const handleAddEmployee = async () => {
+    if (!employeeForm.profile_id || !employeeForm.hire_date || !employeeForm.base_salary) {
+      setMessage('❌ Completa perfil, fecha de contratación y salario base.');
+      return;
+    }
+    setPayrollLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/corporate/employees', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          profile_id: employeeForm.profile_id,
+          hire_date: employeeForm.hire_date,
+          base_salary: Number(employeeForm.base_salary),
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Empleado registrado en nómina.');
+        setEmployeeForm({ profile_id: '', hire_date: '', base_salary: '' });
+        loadPayrollData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo registrar al empleado.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setPayrollLoading(false);
+  };
+
+  const handleOpenRun = async () => {
+    if (!runForm.period_start || !runForm.period_end) {
+      setMessage('❌ Define el inicio y fin del periodo de la planilla.');
+      return;
+    }
+    setPayrollLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/corporate/payroll/runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, ...runForm }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Planilla abierta en borrador.');
+        setRunForm({ period_start: '', period_end: '' });
+        loadPayrollData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo abrir la planilla.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setPayrollLoading(false);
+  };
+
+  const handleCalculateRun = async (runId: string) => {
+    setPayrollLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/corporate/payroll/runs/${runId}/calculate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deduction_rate: Number(deductionRate) / 100 }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ ' + data.message);
+        loadPayrollData();
+        handleViewPaystubs(runId);
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo calcular la planilla.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setPayrollLoading(false);
+  };
+
+  const handleViewPaystubs = async (runId: string) => {
+    setSelectedRunId(runId);
+    try {
+      const response = await fetch(`/api/v1/corporate/payroll/runs/${runId}/paystubs`);
+      const data = await response.json();
+      setPaystubs(data.paystubs || []);
+    } catch {
+      setMessage('❌ Error al consultar los recibos de pago.');
+    }
+  };
 
   const handleAssignAsset = async (tag: string) => {
     // Simulando llamada a /api/v1/corporate/assets/assign
@@ -58,11 +209,17 @@ export const CorporatePortal: React.FC = () => {
         >
           <Monitor className="w-4 h-4 mr-2" /> Patrimonio IT (Equipos)
         </button>
-        <button 
+        <button
           onClick={() => setActiveTab('consumables')}
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'consumables' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
           <Package className="w-4 h-4 mr-2" /> Bodega y Consumibles
+        </button>
+        <button
+          onClick={() => setActiveTab('payroll')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'payroll' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <Wallet className="w-4 h-4 mr-2" /> Nómina y Planillas
         </button>
       </div>
 
@@ -147,7 +304,7 @@ export const CorporatePortal: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button 
+                    <button
                       onClick={() => handleDispatchConsumable(item.name, item.unitCost)}
                       className="text-indigo-600 font-bold hover:text-indigo-800 bg-indigo-50 px-3 py-1 rounded border border-indigo-200"
                     >
@@ -158,6 +315,212 @@ export const CorporatePortal: React.FC = () => {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Nómina y Planillas */}
+      {activeTab === 'payroll' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
+              <h2 className="font-bold text-slate-700 flex items-center"><Users className="w-4 h-4 mr-2 text-blue-600" /> Dar de Alta Empleado en Nómina</h2>
+              <input
+                type="text" placeholder="ID de perfil (profile_id del staff)" value={employeeForm.profile_id}
+                onChange={e => setEmployeeForm({ ...employeeForm, profile_id: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-400">Fecha de contratación</label>
+                  <input
+                    type="date" value={employeeForm.hire_date}
+                    onChange={e => setEmployeeForm({ ...employeeForm, hire_date: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">Salario base</label>
+                  <input
+                    type="number" placeholder="0.00" value={employeeForm.base_salary}
+                    onChange={e => setEmployeeForm({ ...employeeForm, base_salary: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <button
+                onClick={handleAddEmployee}
+                disabled={payrollLoading}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm"
+              >
+                {payrollLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                Registrar Empleado
+              </button>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
+              <h2 className="font-bold text-slate-700 flex items-center"><Calculator className="w-4 h-4 mr-2 text-blue-600" /> Abrir Planilla del Periodo</h2>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-400">Inicio del periodo</label>
+                  <input
+                    type="date" value={runForm.period_start}
+                    onChange={e => setRunForm({ ...runForm, period_start: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">Fin del periodo</label>
+                  <input
+                    type="date" value={runForm.period_end}
+                    onChange={e => setRunForm({ ...runForm, period_end: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-slate-400">% Deducciones (seguro social / impuestos) al calcular</label>
+                <input
+                  type="number" value={deductionRate}
+                  onChange={e => setDeductionRate(e.target.value)}
+                  className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <button
+                onClick={handleOpenRun}
+                disabled={payrollLoading}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm"
+              >
+                {payrollLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                Abrir Planilla
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center">
+              <Users className="w-4 h-4 mr-2 text-blue-600" />
+              <h2 className="font-bold text-slate-700">Staff en Nómina</h2>
+            </div>
+            {employees.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay empleados dados de alta en nómina.</p>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">EMPLEADO</th>
+                    <th className="px-4 py-3 font-semibold">ROL</th>
+                    <th className="px-4 py-3 font-semibold">CONTRATADO</th>
+                    <th className="px-4 py-3 font-semibold text-right">SALARIO BASE</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {employees.map(emp => (
+                    <tr key={emp.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-semibold">
+                        {emp.profiles ? `${emp.profiles.first_name} ${emp.profiles.last_name}` : 'Sin perfil vinculado'}
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">{emp.profiles?.role || '—'}</td>
+                      <td className="px-4 py-3 text-slate-500">{emp.hire_date}</td>
+                      <td className="px-4 py-3 text-right font-mono">${Number(emp.base_salary).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center">
+              <Wallet className="w-4 h-4 mr-2 text-blue-600" />
+              <h2 className="font-bold text-slate-700">Planillas</h2>
+            </div>
+            {payrollRuns.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay planillas abiertas.</p>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">PERIODO</th>
+                    <th className="px-4 py-3 font-semibold">ESTADO</th>
+                    <th className="px-4 py-3 font-semibold text-right">TOTAL NETO</th>
+                    <th className="px-4 py-3 font-semibold text-right">ACCIÓN</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {payrollRuns.map(run => (
+                    <tr key={run.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3">{run.period_start} → {run.period_end}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                          run.status === 'paid' ? 'bg-emerald-100 text-emerald-700' :
+                          run.status === 'approved' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
+                        }`}>{run.status}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono">${Number(run.total_amount).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right space-x-2">
+                        {run.status === 'draft' ? (
+                          <button
+                            onClick={() => handleCalculateRun(run.id)}
+                            disabled={payrollLoading}
+                            className="text-blue-600 font-bold hover:text-blue-800 bg-blue-50 px-3 py-1 rounded disabled:opacity-50"
+                          >
+                            Calcular Planilla
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleViewPaystubs(run.id)}
+                            className="text-slate-600 font-bold hover:text-slate-800 bg-slate-100 px-3 py-1 rounded"
+                          >
+                            Ver Recibos
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {selectedRunId && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-4 border-b border-slate-100 bg-slate-50">
+                <h2 className="font-bold text-slate-700">Recibos de Pago (Paystubs)</h2>
+              </div>
+              {paystubs.length === 0 ? (
+                <p className="p-6 text-sm text-slate-400">Esta planilla aún no tiene recibos generados.</p>
+              ) : (
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">EMPLEADO</th>
+                      <th className="px-4 py-3 font-semibold text-right">BRUTO</th>
+                      <th className="px-4 py-3 font-semibold text-right">DEDUCCIONES</th>
+                      <th className="px-4 py-3 font-semibold text-right">NETO A PAGAR</th>
+                      <th className="px-4 py-3 font-semibold text-right">ESTADO</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {paystubs.map(p => (
+                      <tr key={p.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 font-semibold">
+                          {p.hr_employees?.profiles ? `${p.hr_employees.profiles.first_name} ${p.hr_employees.profiles.last_name}` : 'Empleado'}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono">${Number(p.gross_pay).toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-rose-600">-${Number(p.deductions).toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right font-mono font-bold">${Number(p.net_pay).toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right">
+                          <span className={`px-2 py-1 rounded-full text-xs font-bold ${p.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {p.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
         </div>
       )}
 
