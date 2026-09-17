@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { GraduationCap, FileText, CreditCard, FileSignature, CheckCircle, AlertTriangle, Download, Loader2, Car, UserCheck, Plus, Camera, UserCircle2, BarChart3 } from 'lucide-react';
 import { StudentMedicalRecord } from './StudentMedicalRecord';
 import { ParentDashboard } from './ParentDashboard';
+import { PaymentCenter } from './PaymentCenter';
 import { GuardianInfoForm } from './GuardianInfoForm';
 
 // Contexto de demostración: en producción estos IDs vienen del token JWT de Supabase Auth (Fase 2)
@@ -63,23 +64,12 @@ interface ReportCard {
   report_card_details?: { final_score: number; classes?: { name: string } }[];
 }
 
-interface Invoice {
-  id: string;
-  invoice_number: string;
-  amount: number;
-  currency: string;
-  status: string;
-  due_date: string;
-}
-
 export const ParentStudentPortal: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [reportCards, setReportCards] = useState<ReportCard[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
-  const [payingInvoiceId, setPayingInvoiceId] = useState<string | null>(null);
 
   // --- Recogida y Carpool ---
   const [replacements, setReplacements] = useState<ReplacementRequest[]>([]);
@@ -325,19 +315,16 @@ export const ParentStudentPortal: React.FC = () => {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [enrollmentsRes, bulletinsRes, invoicesRes] = await Promise.all([
+        const [enrollmentsRes, bulletinsRes] = await Promise.all([
           fetch(`/api/v1/enrollments/${DEMO_STUDENT_ID}`),
           fetch(`/api/v1/bulletins/${DEMO_STUDENT_ID}`),
-          fetch(`/api/v1/finance/invoices/${DEMO_STUDENT_ID}`),
         ]);
 
         const enrollmentsData = await enrollmentsRes.json();
         const bulletinsData = await bulletinsRes.json();
-        const invoicesData = await invoicesRes.json();
 
         setEnrollments(enrollmentsData.enrollments || []);
         setReportCards(bulletinsData.reportCards || []);
-        setInvoices(invoicesData.invoices || []);
       } catch (error) {
         setMessage('❌ No se pudo conectar con el servidor SIS.');
       }
@@ -345,27 +332,6 @@ export const ParentStudentPortal: React.FC = () => {
     };
     loadData();
   }, []);
-
-  const handlePay = async (invoiceId: string, method: 'checkout' | 'checkout/yappy') => {
-    setPayingInvoiceId(invoiceId);
-    setMessage('');
-    try {
-      const response = await fetch(`/api/v1/finance/${method}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoice_id: invoiceId }),
-      });
-      const data = await response.json();
-      if (data.success && data.checkout_url) {
-        setMessage(`✅ Enlace de pago generado: ${data.checkout_url}`);
-      } else {
-        setMessage('❌ ' + (data.error || 'No se pudo iniciar el pago.'));
-      }
-    } catch {
-      setMessage('❌ Error de conexión al procesar el pago.');
-    }
-    setPayingInvoiceId(null);
-  };
 
   const pendingContract = enrollments.find(e => e.status === 'pending_signature' && e.contract_url);
 
@@ -430,7 +396,7 @@ export const ParentStudentPortal: React.FC = () => {
           onClick={() => setActiveTab('payments')}
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'payments' ? 'bg-purple-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
-          <CreditCard className="w-4 h-4 mr-2" /> Colegiaturas
+          <CreditCard className="w-4 h-4 mr-2" /> Centro de Pagos
         </button>
         <button
           onClick={() => setActiveTab('pickup')}
@@ -558,60 +524,7 @@ export const ParentStudentPortal: React.FC = () => {
             </div>
           )}
 
-          {activeTab === 'payments' && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="p-4 border-b border-slate-100 bg-slate-50">
-                <h2 className="font-bold text-slate-700">Facturas de Colegiatura</h2>
-              </div>
-              {invoices.length === 0 ? (
-                <p className="p-6 text-sm text-slate-400">No hay facturas registradas para este alumno.</p>
-              ) : (
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
-                    <tr>
-                      <th className="px-4 py-3 font-semibold">FACTURA</th>
-                      <th className="px-4 py-3 font-semibold">MONTO</th>
-                      <th className="px-4 py-3 font-semibold">VENCE</th>
-                      <th className="px-4 py-3 font-semibold">ESTADO</th>
-                      <th className="px-4 py-3 font-semibold text-right">PAGO</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {invoices.map(inv => (
-                      <tr key={inv.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-mono font-bold text-slate-600">{inv.invoice_number}</td>
-                        <td className="px-4 py-3">{inv.currency} {Number(inv.amount).toFixed(2)}</td>
-                        <td className="px-4 py-3 text-slate-500">{inv.due_date}</td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded-full text-xs font-bold ${statusBadge(inv.status)}`}>{inv.status}</span>
-                        </td>
-                        <td className="px-4 py-3 text-right space-x-2">
-                          {inv.status !== 'paid' && (
-                            <>
-                              <button
-                                onClick={() => handlePay(inv.id, 'checkout')}
-                                disabled={payingInvoiceId === inv.id}
-                                className="text-purple-600 font-bold hover:text-purple-800 bg-purple-50 px-3 py-1 rounded disabled:opacity-50"
-                              >
-                                Tarjeta
-                              </button>
-                              <button
-                                onClick={() => handlePay(inv.id, 'checkout/yappy')}
-                                disabled={payingInvoiceId === inv.id}
-                                className="text-indigo-600 font-bold hover:text-indigo-800 bg-indigo-50 px-3 py-1 rounded disabled:opacity-50"
-                              >
-                                Yappy
-                              </button>
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          )}
+          {activeTab === 'payments' && <PaymentCenter studentId={DEMO_STUDENT_ID} />}
 
           {activeTab === 'pickup' && (
             <div className="space-y-6">
