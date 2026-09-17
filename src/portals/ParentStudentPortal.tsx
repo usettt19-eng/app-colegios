@@ -24,6 +24,12 @@ interface CarpoolAuthorization {
   driver_parent_id: string;
 }
 
+interface CarpoolOverride {
+  id: string;
+  override_date: string;
+  driver_parent_id: string;
+}
+
 interface ClassEnrollment {
   final_grade: number | null;
   classes?: { name: string; courses?: { name: string; credits: number } };
@@ -66,20 +72,25 @@ export const ParentStudentPortal: React.FC = () => {
   // --- Recogida y Carpool ---
   const [replacements, setReplacements] = useState<ReplacementRequest[]>([]);
   const [carpoolAuths, setCarpoolAuths] = useState<CarpoolAuthorization[]>([]);
+  const [carpoolOverrides, setCarpoolOverrides] = useState<CarpoolOverride[]>([]);
   const [pickupLoading, setPickupLoading] = useState(false);
   const [replacementForm, setReplacementForm] = useState({ replacement_name: '', replacement_phone: '', is_recurring: true });
   const [carpoolForm, setCarpoolForm] = useState({ driver_parent_id: '', day_of_week: '1' });
+  const [overrideForm, setOverrideForm] = useState({ driver_parent_id: '', override_date: '' });
 
   const loadPickupData = async () => {
     try {
-      const [replacementsRes, carpoolRes] = await Promise.all([
+      const [replacementsRes, carpoolRes, overridesRes] = await Promise.all([
         fetch(`/api/v1/pickup/replacements?tenant_id=${DEMO_TENANT_ID}&parent_id=${DEMO_PARENT_ID}`),
         fetch(`/api/v1/pickup/carpool/authorizations?tenant_id=${DEMO_TENANT_ID}&student_id=${DEMO_STUDENT_ID}`),
+        fetch(`/api/v1/pickup/carpool/overrides?tenant_id=${DEMO_TENANT_ID}&student_id=${DEMO_STUDENT_ID}`),
       ]);
       const replacementsData = await replacementsRes.json();
       const carpoolData = await carpoolRes.json();
+      const overridesData = await overridesRes.json();
       setReplacements(replacementsData.replacements || []);
       setCarpoolAuths(carpoolData.authorizations || []);
+      setCarpoolOverrides(overridesData.overrides || []);
     } catch {
       setMessage('❌ No se pudo conectar con el servidor SIS.');
     }
@@ -147,6 +158,40 @@ export const ParentStudentPortal: React.FC = () => {
         loadPickupData();
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo crear la autorización.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setPickupLoading(false);
+  };
+
+  const handleCreateOverride = async () => {
+    if (!overrideForm.driver_parent_id || !overrideForm.override_date) {
+      setMessage('❌ Indica el conductor y la fecha de la excepción.');
+      return;
+    }
+    setPickupLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/pickup/carpool/overrides', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          student_id: DEMO_STUDENT_ID,
+          authorizing_parent_id: DEMO_PARENT_ID,
+          driver_parent_id: overrideForm.driver_parent_id,
+          override_date: overrideForm.override_date,
+          created_by: DEMO_PARENT_ID,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Excepción de carpool registrada para ese día.');
+        setOverrideForm({ driver_parent_id: '', override_date: '' });
+        loadPickupData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo registrar la excepción.'));
       }
     } catch {
       setMessage('❌ Error de conexión.');
@@ -481,6 +526,29 @@ export const ParentStudentPortal: React.FC = () => {
                     Autorizar Carpool
                   </button>
                 </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
+                  <h2 className="font-bold text-slate-700 flex items-center"><Car className="w-4 h-4 mr-2 text-purple-600" /> Excepción de Carpool (1 día)</h2>
+                  <p className="text-xs text-slate-500">Para un día puntual, alguien distinto al carpool recurrente recogerá a tu hijo.</p>
+                  <input
+                    type="text" placeholder="ID de perfil del padre conductor" value={overrideForm.driver_parent_id}
+                    onChange={e => setOverrideForm({ ...overrideForm, driver_parent_id: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                  <input
+                    type="date" value={overrideForm.override_date}
+                    onChange={e => setOverrideForm({ ...overrideForm, override_date: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                  <button
+                    onClick={handleCreateOverride}
+                    disabled={pickupLoading}
+                    className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 font-semibold text-sm"
+                  >
+                    {pickupLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                    Registrar Excepción
+                  </button>
+                </div>
               </div>
 
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -516,6 +584,24 @@ export const ParentStudentPortal: React.FC = () => {
                       <div key={c.id} className="p-4 flex items-center justify-between text-sm">
                         <span className="font-semibold text-slate-700">{DAYS[c.day_of_week]}</span>
                         <span className="text-slate-500 font-mono text-xs">Conductor: {c.driver_parent_id}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="p-4 border-b border-slate-100 bg-slate-50">
+                  <h2 className="font-bold text-slate-700">Excepciones de Carpool</h2>
+                </div>
+                {carpoolOverrides.length === 0 ? (
+                  <p className="p-6 text-sm text-slate-400">Aún no hay excepciones de carpool registradas.</p>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {carpoolOverrides.map(o => (
+                      <div key={o.id} className="p-4 flex items-center justify-between text-sm">
+                        <span className="font-semibold text-slate-700">{o.override_date}</span>
+                        <span className="text-slate-500 font-mono text-xs">Conductor: {o.driver_parent_id}</span>
                       </div>
                     ))}
                   </div>
