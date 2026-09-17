@@ -75,6 +75,38 @@ router.get("/:id", async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/v1/students/:id/general-info
+// Actualiza los datos generales del expediente del alumno
+// (cédula, nombres/apellidos desglosados, nacimiento, nacionalidad, religión, escuela de procedencia, etc.)
+router.post("/:id/general-info", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const {
+      cedula, apellido_paterno, apellido_materno, primer_nombre, segundo_nombre,
+      birth_date, gender, nationality, birth_place, religion, baptized,
+      previous_school, email, address, grade, section,
+    } = req.body;
+
+    const { data: student, error } = await supabaseAdmin
+      .from("students")
+      .update({
+        cedula, apellido_paterno, apellido_materno, primer_nombre, segundo_nombre,
+        birth_date, gender, nationality, birth_place, religion, baptized,
+        previous_school, email, address, grade, section,
+      })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error || !student) return res.status(404).json({ error: "Alumno no encontrado." });
+
+    return res.status(200).json({ success: true, message: "Datos generales del alumno actualizados.", student });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/students/:id/general-info:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // POST /api/v1/students/:id/photo
 // Sube (o reemplaza) la foto del expediente del alumno al bucket profile_photos
 router.post("/:id/photo", async (req: Request, res: Response) => {
@@ -103,6 +135,27 @@ router.post("/:id/photo", async (req: Request, res: Response) => {
     return res.status(200).json({ success: true, message: "Foto del alumno actualizada.", student });
   } catch (error: any) {
     console.error("Error en POST /api/v1/students/:id/photo:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// GET /api/v1/students/:id/guardians
+// Lista los adultos vinculados al alumno (madre, padre, acudiente, etc.)
+// con su perfil completo, para el flujo de "Actualización de Datos"
+router.get("/:id/guardians", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const { data, error } = await supabaseAdmin
+      .from("parent_students")
+      .select("relationship, profiles(*)")
+      .eq("student_id", id);
+
+    if (error) return res.status(500).json({ error: "Error al consultar los responsables del alumno." });
+
+    return res.status(200).json({ success: true, guardians: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/students/:id/guardians:", error);
     return res.status(500).json({ error: "Error interno" });
   }
 });

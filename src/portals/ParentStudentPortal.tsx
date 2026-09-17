@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { GraduationCap, FileText, CreditCard, FileSignature, CheckCircle, AlertTriangle, Download, Loader2, Car, UserCheck, Plus, Camera, UserCircle2 } from 'lucide-react';
+import { StudentMedicalRecord } from './StudentMedicalRecord';
+import { GuardianInfoForm } from './GuardianInfoForm';
 
 // Contexto de demostración: en producción estos IDs vienen del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -87,41 +89,60 @@ export const ParentStudentPortal: React.FC = () => {
   const [carpoolForm, setCarpoolForm] = useState({ driver_parent_id: '', day_of_week: '1' });
   const [overrideForm, setOverrideForm] = useState({ driver_parent_id: '', override_date: '' });
 
-  // --- Perfil: fotos e información general del alumno y del padre/tutor ---
+  // --- Perfil ("Actualización de Datos"): Estudiante | Madre | Padre | Acudiente | Información Adicional ---
+  type ProfileSubTab = 'estudiante' | 'madre' | 'padre' | 'acudiente' | 'adicional';
+  const [profileSubTab, setProfileSubTab] = useState<ProfileSubTab>('estudiante');
   const [studentPhoto, setStudentPhoto] = useState<string | null>(null);
-  const [parentPhoto, setParentPhoto] = useState<string | null>(null);
   const [photoLoading, setPhotoLoading] = useState(false);
-  const [generalInfoLoading, setGeneralInfoLoading] = useState(false);
-  const [generalInfoForm, setGeneralInfoForm] = useState({
-    cedula: '', first_name: '', last_name: '', phone: '', office_phone: '', mobile_phone: '',
-    nationality: '', email: '', confirm_email: '', profession: '', workplace: '', address: '',
+  const [guardianIds, setGuardianIds] = useState<{ madre: string | null; padre: string | null; acudiente: string | null }>({
+    madre: null, padre: null, acudiente: null,
   });
+
+  const loadGuardians = async () => {
+    try {
+      const response = await fetch(`/api/v1/students/${DEMO_STUDENT_ID}/guardians`);
+      const data = await response.json();
+      const guardians = data.guardians || [];
+      const find = (rel: string) => guardians.find((g: any) => g.relationship === rel)?.profiles?.id || null;
+      setGuardianIds({ madre: find('madre'), padre: find('padre'), acudiente: find('acudiente') });
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+  };
+
+  const [studentInfoLoading, setStudentInfoLoading] = useState(false);
+  const [studentInfoForm, setStudentInfoForm] = useState({
+    cedula: '', apellido_paterno: '', apellido_materno: '', primer_nombre: '', segundo_nombre: '',
+    birth_date: '', gender: '', nationality: '', birth_place: '', religion: '', baptized: true,
+    previous_school: '', email: '', address: '',
+  });
+
+  const studentAge = studentInfoForm.birth_date
+    ? Math.floor((Date.now() - new Date(studentInfoForm.birth_date).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+    : null;
 
   const loadProfilePhotos = async () => {
     try {
-      const [studentRes, parentRes] = await Promise.all([
-        fetch(`/api/v1/students/${DEMO_STUDENT_ID}`),
-        fetch(`/api/v1/profiles/${DEMO_PARENT_ID}`),
-      ]);
+      const studentRes = await fetch(`/api/v1/students/${DEMO_STUDENT_ID}`);
       const studentData = await studentRes.json();
-      const parentData = await parentRes.json();
       setStudentPhoto(studentData.student?.photo_url || null);
-      setParentPhoto(parentData.profile?.photo_url || null);
-      const p = parentData.profile;
-      if (p) {
-        setGeneralInfoForm({
-          cedula: p.cedula || '',
-          first_name: p.first_name || '',
-          last_name: p.last_name || '',
-          phone: p.phone || '',
-          office_phone: p.office_phone || '',
-          mobile_phone: p.mobile_phone || '',
-          nationality: p.nationality || '',
-          email: p.email || '',
-          confirm_email: p.email || '',
-          profession: p.profession || '',
-          workplace: p.workplace || '',
-          address: p.address || '',
+      const s = studentData.student;
+      if (s) {
+        setStudentInfoForm({
+          cedula: s.cedula || '',
+          apellido_paterno: s.apellido_paterno || '',
+          apellido_materno: s.apellido_materno || '',
+          primer_nombre: s.primer_nombre || '',
+          segundo_nombre: s.segundo_nombre || '',
+          birth_date: s.birth_date || '',
+          gender: s.gender || '',
+          nationality: s.nationality || '',
+          birth_place: s.birth_place || '',
+          religion: s.religion || '',
+          baptized: s.baptized ?? true,
+          previous_school: s.previous_school || '',
+          email: s.email || '',
+          address: s.address || '',
         });
       }
     } catch {
@@ -129,30 +150,25 @@ export const ParentStudentPortal: React.FC = () => {
     }
   };
 
-  const handleSaveGeneralInfo = async () => {
-    if (generalInfoForm.email !== generalInfoForm.confirm_email) {
-      setMessage('❌ El correo y su confirmación no coinciden.');
-      return;
-    }
-    setGeneralInfoLoading(true);
+  const handleSaveStudentInfo = async () => {
+    setStudentInfoLoading(true);
     setMessage('');
     try {
-      const { confirm_email, ...payload } = generalInfoForm;
-      const response = await fetch(`/api/v1/profiles/${DEMO_PARENT_ID}/general-info`, {
+      const response = await fetch(`/api/v1/students/${DEMO_STUDENT_ID}/general-info`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(studentInfoForm),
       });
       const data = await response.json();
       if (data.success) {
-        setMessage('✅ Información general actualizada.');
+        setMessage('✅ Datos generales del alumno actualizados.');
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo guardar la información.'));
       }
     } catch {
       setMessage('❌ Error de conexión.');
     }
-    setGeneralInfoLoading(false);
+    setStudentInfoLoading(false);
   };
 
   const handleUploadStudentPhoto = async (file: File | undefined) => {
@@ -170,30 +186,6 @@ export const ParentStudentPortal: React.FC = () => {
       if (data.success) {
         setStudentPhoto(data.student?.photo_url || dataUrl);
         setMessage('✅ Foto del alumno actualizada.');
-      } else {
-        setMessage('❌ ' + (data.error || 'No se pudo actualizar la foto.'));
-      }
-    } catch {
-      setMessage('❌ Error al subir la foto.');
-    }
-    setPhotoLoading(false);
-  };
-
-  const handleUploadParentPhoto = async (file: File | undefined) => {
-    if (!file) return;
-    setPhotoLoading(true);
-    setMessage('');
-    try {
-      const dataUrl = await readFileAsDataUrl(file);
-      const response = await fetch(`/api/v1/profiles/${DEMO_PARENT_ID}/photo`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, photo_url: dataUrl }),
-      });
-      const data = await response.json();
-      if (data.success) {
-        setParentPhoto(data.profile?.photo_url || dataUrl);
-        setMessage('✅ Tu foto de perfil fue actualizada.');
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo actualizar la foto.'));
       }
@@ -223,7 +215,10 @@ export const ParentStudentPortal: React.FC = () => {
 
   useEffect(() => {
     if (activeTab === 'pickup') loadPickupData();
-    if (activeTab === 'profile') loadProfilePhotos();
+    if (activeTab === 'profile') {
+      loadProfilePhotos();
+      loadGuardians();
+    }
   }, [activeTab]);
 
   const handleCreateReplacement = async () => {
@@ -744,159 +739,166 @@ export const ParentStudentPortal: React.FC = () => {
 
           {activeTab === 'profile' && (
             <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-3 text-center">
-                <h2 className="font-bold text-slate-700 flex items-center justify-center"><GraduationCap className="w-4 h-4 mr-2 text-purple-600" /> Foto del Alumno</h2>
-                <div className="w-28 h-28 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center mx-auto">
-                  {studentPhoto ? (
-                    <img src={studentPhoto} alt="Foto del alumno" className="w-full h-full object-cover" />
-                  ) : (
-                    <Camera className="w-8 h-8 text-slate-300" />
-                  )}
-                </div>
-                <label className="inline-flex items-center px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-md text-sm font-semibold cursor-pointer">
-                  {photoLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Camera className="w-4 h-4 mr-2" />}
-                  Actualizar Foto
-                  <input
-                    type="file" accept="image/*" className="hidden" disabled={photoLoading}
-                    onChange={e => handleUploadStudentPhoto(e.target.files?.[0])}
-                  />
-                </label>
+              <div className="text-center">
+                <h1 className="text-xl font-bold text-slate-800">Actualización de Datos</h1>
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-3 text-center">
-                <h2 className="font-bold text-slate-700 flex items-center justify-center"><UserCircle2 className="w-4 h-4 mr-2 text-purple-600" /> Mi Foto (Padre/Tutor)</h2>
-                <div className="w-28 h-28 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center mx-auto">
-                  {parentPhoto ? (
-                    <img src={parentPhoto} alt="Tu foto" className="w-full h-full object-cover" />
-                  ) : (
-                    <Camera className="w-8 h-8 text-slate-300" />
-                  )}
-                </div>
-                <label className="inline-flex items-center px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-md text-sm font-semibold cursor-pointer">
-                  {photoLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Camera className="w-4 h-4 mr-2" />}
-                  Actualizar Foto
-                  <input
-                    type="file" accept="image/*" className="hidden" disabled={photoLoading}
-                    onChange={e => handleUploadParentPhoto(e.target.files?.[0])}
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="px-6 py-4 bg-blue-600">
-                <h2 className="font-bold text-white">Información General (Padre/Tutor)</h2>
-              </div>
-              <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Cédula</label>
-                  <input
-                    type="text" value={generalInfoForm.cedula}
-                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, cedula: e.target.value })}
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Nombre</label>
-                  <input
-                    type="text" value={generalInfoForm.first_name}
-                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, first_name: e.target.value })}
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Apellido</label>
-                  <input
-                    type="text" value={generalInfoForm.last_name}
-                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, last_name: e.target.value })}
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Teléfono</label>
-                  <input
-                    type="text" value={generalInfoForm.phone}
-                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, phone: e.target.value })}
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Tel. Oficina</label>
-                  <input
-                    type="text" value={generalInfoForm.office_phone}
-                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, office_phone: e.target.value })}
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Tel. Móvil</label>
-                  <input
-                    type="text" value={generalInfoForm.mobile_phone}
-                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, mobile_phone: e.target.value })}
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Nacionalidad</label>
-                  <input
-                    type="text" value={generalInfoForm.nationality}
-                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, nationality: e.target.value })}
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Email</label>
-                  <input
-                    type="email" value={generalInfoForm.email}
-                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, email: e.target.value })}
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Confirmar Email</label>
-                  <input
-                    type="email" value={generalInfoForm.confirm_email}
-                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, confirm_email: e.target.value })}
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Profesión</label>
-                  <input
-                    type="text" value={generalInfoForm.profession}
-                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, profession: e.target.value })}
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Lugar de Trabajo</label>
-                  <input
-                    type="text" value={generalInfoForm.workplace}
-                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, workplace: e.target.value })}
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-xs text-slate-500 mb-1">Dirección</label>
-                  <input
-                    type="text" value={generalInfoForm.address}
-                    onChange={e => setGeneralInfoForm({ ...generalInfoForm, address: e.target.value })}
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-              <div className="px-6 pb-6">
+              <div className="flex flex-wrap justify-center gap-2 border-b border-slate-200 pb-3">
+                {([
+                  ['estudiante', 'Estudiante'],
+                  ['madre', 'Madre'],
+                  ['padre', 'Padre'],
+                  ['acudiente', 'Acudiente'],
+                ] as [ProfileSubTab, string][]).map(([tab, label]) => (
+                  <button
+                    key={tab}
+                    onClick={() => setProfileSubTab(tab)}
+                    className={`px-4 py-2 rounded-md text-sm font-bold uppercase tracking-wide transition-colors ${profileSubTab === tab ? 'text-purple-700 border-b-2 border-purple-600' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
                 <button
-                  onClick={handleSaveGeneralInfo}
-                  disabled={generalInfoLoading}
-                  className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm"
+                  onClick={() => setProfileSubTab('adicional')}
+                  className={`px-4 py-2 rounded-md text-sm font-bold transition-colors ${profileSubTab === 'adicional' ? 'bg-teal-600 text-white' : 'bg-teal-50 text-teal-700 hover:bg-teal-100'}`}
                 >
-                  {generalInfoLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2" />}
-                  Guardar Información General
+                  Información Adicional
                 </button>
               </div>
-            </div>
+
+              {profileSubTab === 'estudiante' && (
+                <div className="space-y-6">
+                  <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-3 text-center max-w-xs mx-auto">
+                    <h2 className="font-bold text-slate-700 flex items-center justify-center"><GraduationCap className="w-4 h-4 mr-2 text-purple-600" /> Foto del Alumno</h2>
+                    <div className="w-28 h-28 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center mx-auto">
+                      {studentPhoto ? (
+                        <img src={studentPhoto} alt="Foto del alumno" className="w-full h-full object-cover" />
+                      ) : (
+                        <Camera className="w-8 h-8 text-slate-300" />
+                      )}
+                    </div>
+                    <label className="inline-flex items-center px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-md text-sm font-semibold cursor-pointer">
+                      {photoLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Camera className="w-4 h-4 mr-2" />}
+                      Actualizar Foto
+                      <input
+                        type="file" accept="image/*" className="hidden" disabled={photoLoading}
+                        onChange={e => handleUploadStudentPhoto(e.target.files?.[0])}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="px-6 py-3 bg-blue-600">
+                      <h2 className="font-bold text-white">Datos Generales</h2>
+                    </div>
+                    <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 text-sm">
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Cédula</label>
+                        <input value={studentInfoForm.cedula} onChange={e => setStudentInfoForm({ ...studentInfoForm, cedula: e.target.value })} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <span className="block text-xs text-slate-500 mb-1">Edad</span>
+                        <p className="px-3 py-2 text-slate-700">{studentAge ?? '—'}</p>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Apellido Paterno</label>
+                        <input value={studentInfoForm.apellido_paterno} onChange={e => setStudentInfoForm({ ...studentInfoForm, apellido_paterno: e.target.value })} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Apellido Materno</label>
+                        <input value={studentInfoForm.apellido_materno} onChange={e => setStudentInfoForm({ ...studentInfoForm, apellido_materno: e.target.value })} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Primer Nombre</label>
+                        <input value={studentInfoForm.primer_nombre} onChange={e => setStudentInfoForm({ ...studentInfoForm, primer_nombre: e.target.value })} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Segundo Nombre</label>
+                        <input value={studentInfoForm.segundo_nombre} onChange={e => setStudentInfoForm({ ...studentInfoForm, segundo_nombre: e.target.value })} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="px-6 py-3 bg-blue-600">
+                      <h2 className="font-bold text-white">Información General</h2>
+                    </div>
+                    <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 text-sm">
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Fecha Nacimiento</label>
+                        <input type="date" value={studentInfoForm.birth_date} onChange={e => setStudentInfoForm({ ...studentInfoForm, birth_date: e.target.value })} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Género</label>
+                        <select value={studentInfoForm.gender} onChange={e => setStudentInfoForm({ ...studentInfoForm, gender: e.target.value })} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm">
+                          <option value="">Selecciona...</option>
+                          <option value="FEMENINO">Femenino</option>
+                          <option value="MASCULINO">Masculino</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Nacionalidad</label>
+                        <input value={studentInfoForm.nationality} onChange={e => setStudentInfoForm({ ...studentInfoForm, nationality: e.target.value })} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Lugar de Nacimiento</label>
+                        <input value={studentInfoForm.birth_place} onChange={e => setStudentInfoForm({ ...studentInfoForm, birth_place: e.target.value })} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Religión</label>
+                        <input value={studentInfoForm.religion} onChange={e => setStudentInfoForm({ ...studentInfoForm, religion: e.target.value })} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <span className="block text-xs text-slate-500 mb-1">Bautizado</span>
+                        <div className="flex items-center gap-4 px-1 py-2">
+                          <label className="flex items-center gap-1.5 text-sm text-slate-600">
+                            <input type="radio" checked={studentInfoForm.baptized === true} onChange={() => setStudentInfoForm({ ...studentInfoForm, baptized: true })} /> Sí
+                          </label>
+                          <label className="flex items-center gap-1.5 text-sm text-slate-600">
+                            <input type="radio" checked={studentInfoForm.baptized === false} onChange={() => setStudentInfoForm({ ...studentInfoForm, baptized: false })} /> No
+                          </label>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Escuela de Procedencia</label>
+                        <input value={studentInfoForm.previous_school} onChange={e => setStudentInfoForm({ ...studentInfoForm, previous_school: e.target.value })} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Correo Electrónico</label>
+                        <input type="email" value={studentInfoForm.email} onChange={e => setStudentInfoForm({ ...studentInfoForm, email: e.target.value })} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs text-slate-500 mb-1">Dirección</label>
+                        <input value={studentInfoForm.address} onChange={e => setStudentInfoForm({ ...studentInfoForm, address: e.target.value })} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                      </div>
+                    </div>
+                    <div className="px-6 pb-6">
+                      <button onClick={handleSaveStudentInfo} disabled={studentInfoLoading} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm">
+                        {studentInfoLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2" />}
+                        Guardar Datos del Alumno
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {profileSubTab === 'madre' && (
+                <GuardianInfoForm tenantId={DEMO_TENANT_ID} profileId={guardianIds.madre} label="Madre" onMessage={setMessage} />
+              )}
+              {profileSubTab === 'padre' && (
+                <GuardianInfoForm tenantId={DEMO_TENANT_ID} profileId={guardianIds.padre} label="Padre" onMessage={setMessage} />
+              )}
+              {profileSubTab === 'acudiente' && (
+                <GuardianInfoForm tenantId={DEMO_TENANT_ID} profileId={guardianIds.acudiente} label="Acudiente" onMessage={setMessage} />
+              )}
+              {profileSubTab === 'adicional' && (
+                <StudentMedicalRecord
+                  tenantId={DEMO_TENANT_ID}
+                  studentId={DEMO_STUDENT_ID}
+                  requesterId={DEMO_PARENT_ID}
+                  onMessage={setMessage}
+                />
+              )}
             </div>
           )}
         </>
