@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { GraduationCap, FileText, CreditCard, FileSignature, CheckCircle, AlertTriangle, Download, Loader2, Car, UserCheck, Plus, Camera, UserCircle2 } from 'lucide-react';
+import { GraduationCap, FileText, CreditCard, FileSignature, CheckCircle, AlertTriangle, Download, Loader2, Car, UserCheck, Plus, Camera, UserCircle2, BarChart3 } from 'lucide-react';
 import { StudentMedicalRecord } from './StudentMedicalRecord';
+import { ParentDashboard } from './ParentDashboard';
 import { GuardianInfoForm } from './GuardianInfoForm';
 
 // Contexto de demostración: en producción estos IDs vienen del token JWT de Supabase Auth (Fase 2)
@@ -19,7 +20,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-type TabId = 'grades' | 'bulletins' | 'contracts' | 'payments' | 'pickup' | 'profile';
+type TabId = 'dashboard' | 'grades' | 'bulletins' | 'contracts' | 'payments' | 'pickup' | 'profile';
 
 interface ReplacementRequest {
   id: string;
@@ -72,7 +73,7 @@ interface Invoice {
 }
 
 export const ParentStudentPortal: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<TabId>('grades');
+  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [reportCards, setReportCards] = useState<ReportCard[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -402,6 +403,12 @@ export const ParentStudentPortal: React.FC = () => {
 
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
         <button
+          onClick={() => setActiveTab('dashboard')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'dashboard' ? 'bg-purple-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <BarChart3 className="w-4 h-4 mr-2" /> Inicio
+        </button>
+        <button
           onClick={() => setActiveTab('grades')}
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'grades' ? 'bg-purple-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
@@ -445,6 +452,16 @@ export const ParentStudentPortal: React.FC = () => {
         </div>
       ) : (
         <>
+          {activeTab === 'dashboard' && (
+            <ParentDashboard
+              tenantId={DEMO_TENANT_ID}
+              studentId={DEMO_STUDENT_ID}
+              onGoToPayments={() => setActiveTab('payments')}
+              onGoToAgenda={() => setActiveTab('bulletins')}
+              onGoToGrades={() => setActiveTab('grades')}
+            />
+          )}
+
           {activeTab === 'grades' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="p-4 border-b border-slate-100 bg-slate-50">

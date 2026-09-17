@@ -181,4 +181,120 @@ router.get("/:id/academic-record", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/v1/students/:id/dashboard
+// Resumen ejecutivo para la pantalla principal del Portal de Padres:
+// estado financiero, datos generales, agenda de próximas tareas/exámenes,
+// información del periodo activo e índice académico por trimestre.
+router.get("/:id/dashboard", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { tenant_id } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    const { data: student } = await supabaseAdmin
+      .from("students")
+      .select("first_name, last_name, grade, section")
+      .eq("id", id)
+      .single();
+
+    if (!student) return res.status(404).json({ error: "Alumno no encontrado." });
+
+    // --- Financiero ---
+    const { data: invoices } = await supabaseAdmin
+      .from("invoices")
+      .select("amount, status, due_date")
+      .eq("student_id", id)
+      .neq("status", "paid");
+
+    const balance = (invoices || []).reduce((sum, inv) => sum + Number(inv.amount), 0);
+    const today = new Date().toISOString().split("T")[0];
+    const isOverdue = (invoices || []).some(inv => inv.status === "open" && inv.due_date < today);
+
+    // --- Ciclo activo, consejero y grupos del alumno ---
+    const { data: activeTerm } = await supabaseAdmin
+      .from("academic_terms")
+      .select("id, name, start_date, end_date")
+      .eq("tenant_id", tenant_id)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    const { data: enrollment } = activeTerm
+      ? await supabaseAdmin
+          .from("enrollments")
+          .select("id, class_enrollments(class_id, classes(name, profiles(first_name, last_name)))")
+          .eq("student_id", id)
+          .eq("term_id", activeTerm.id)
+          .maybeSingle()
+      : { data: null };
+
+    const classIds: string[] = (enrollment?.class_enrollments || []).map((ce: any) => ce.class_id).filter(Boolean);
+    const firstClass: any = (enrollment?.class_enrollments as any)?.[0]?.classes;
+    const advisorProfile = Array.isArray(firstClass) ? firstClass[0]?.profiles?.[0] : firstClass?.profiles?.[0];
+    const advisorName = advisorProfile ? `${advisorProfile.first_name} ${advisorProfile.last_name}` : null;
+
+    // --- Agenda de tareas/exámenes (semana actual, próxima semana, mes) ---
+    const now = new Date();
+    const startOfWeek = (d: Date) => { const x = new Date(d); const day = x.getDay(); x.setDate(x.getDate() - day); x.setHours(0, 0, 0, 0); return x; };
+    const fmt = (d: Date) => d.toISOString().split("T")[0];
+
+    const curWeekStart = startOfWeek(now);
+    const curWeekEnd = new Date(curWeekStart); curWeekEnd.setDate(curWeekEnd.getDate() + 6);
+    const nextWeekStart = new Date(curWeekStart); nextWeekStart.setDate(nextWeekStart.getDate() + 7);
+    const nextWeekEnd = new Date(nextWeekStart); nextWeekEnd.setDate(nextWeekEnd.getDate() + 6);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+    const countAssignments = async (from: Date, to: Date) => {
+      if (classIds.length === 0) return 0;
+      const { count } = await supabaseAdmin
+        .from("assignments")
+        .select("id", { count: "exact", head: true })
+        .in("class_id", classIds)
+        .gte("due_date", fmt(from))
+        .lte("due_date", fmt(to));
+      return count || 0;
+    };
+
+    const [currentWeekCount, nextWeekCount, monthCount] = await Promise.all([
+      countAssignments(curWeekStart, curWeekEnd),
+      countAssignments(nextWeekStart, nextWeekEnd),
+      countAssignments(monthStart, monthEnd),
+    ]);
+
+    const daysRemaining = activeTerm
+      ? Math.max(0, Math.ceil((new Date(activeTerm.end_date).getTime() - now.getTime()) / (24 * 60 * 60 * 1000)))
+      : null;
+
+    // --- Índice académico (boletines publicados) ---
+    const { data: reportCards } = await supabaseAdmin
+      .from("report_cards")
+      .select("gpa, academic_terms(name)")
+      .eq("student_id", id)
+      .eq("is_published", true)
+      .order("created_at");
+
+    const byTerm = (reportCards || []).map((rc: any) => ({ term_name: rc.academic_terms?.name || "Periodo", gpa: Number(rc.gpa) }));
+    const accumulated = byTerm.length > 0 ? byTerm.reduce((sum, t) => sum + t.gpa, 0) / byTerm.length : null;
+
+    return res.status(200).json({
+      success: true,
+      dashboard: {
+        student: { name: `${student.first_name} ${student.last_name}`, grade: student.grade, section: student.section },
+        financial: { balance, status: isOverdue ? "moroso" : "al_dia" },
+        general: { term_name: activeTerm?.name || null, advisor_name: advisorName },
+        assignments_agenda: {
+          current_week: { start: fmt(curWeekStart), end: fmt(curWeekEnd), count: currentWeekCount },
+          next_week: { start: fmt(nextWeekStart), end: fmt(nextWeekEnd), count: nextWeekCount },
+          month: { start: fmt(monthStart), end: fmt(monthEnd), count: monthCount },
+        },
+        period: activeTerm ? { name: activeTerm.name, start_date: activeTerm.start_date, end_date: activeTerm.end_date, days_remaining: daysRemaining } : null,
+        academic_index: { by_term: byTerm, accumulated },
+      },
+    });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/students/:id/dashboard:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 export default router;
