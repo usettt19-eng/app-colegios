@@ -1,13 +1,15 @@
 import React, { useState } from "react";
-import { Network, Database, Globe, Layers, Users, Cpu, ShieldCheck, HelpCircle, Server, FileCode, CheckCircle2 } from "lucide-react";
+import { Network, Database, Globe, Layers, Users, Cpu, ShieldCheck, HelpCircle, Server, FileCode, CheckCircle2, UserCircle, Briefcase } from "lucide-react";
 import ArchitectureVisualizer from "./components/ArchitectureVisualizer";
 import DatabaseSchemaExplorer from "./components/DatabaseSchemaExplorer";
 import APIPlayground from "./components/APIPlayground";
 import ModuleBlueprint from "./components/ModuleBlueprint";
 import PortalPreviews from "./components/PortalPreviews";
 import AIAdvisor from "./components/AIAdvisor";
+import { TeacherPortal } from "./portals/TeacherPortal";
+import { CorporatePortal } from "./portals/CorporatePortal";
 
-type TabId = "diagram" | "database" | "api" | "modules" | "portals" | "ai_advisor";
+type TabId = "diagram" | "database" | "api" | "modules" | "portals" | "ai_advisor" | "teacher_real" | "corporate_real";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>("diagram");
@@ -63,8 +65,35 @@ export default function App() {
             }`}
           >
             <Network className="w-4 h-4" />
-            Diagrama de Arquitectura
+            Diagrama
           </button>
+          
+          {/* New Portal Real */}
+          <button
+            onClick={() => setActiveTab("teacher_real")}
+            className={`px-4 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all duration-200 shrink-0 cursor-pointer ${
+              activeTab === "teacher_real"
+                ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/15"
+                : "text-emerald-400 hover:text-emerald-200 hover:bg-slate-800/40 border border-emerald-900/30"
+            }`}
+          >
+            <UserCircle className="w-4 h-4" />
+            VER PORTAL DOCENTE
+          </button>
+
+          {/* Corporate ERP Portal */}
+          <button
+            onClick={() => setActiveTab("corporate_real")}
+            className={`px-4 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all duration-200 shrink-0 cursor-pointer ${
+              activeTab === "corporate_real"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/15"
+                : "text-blue-400 hover:text-blue-200 hover:bg-slate-800/40 border border-blue-900/30"
+            }`}
+          >
+            <Briefcase className="w-4 h-4" />
+            VER PORTAL ERP
+          </button>
+
           <button
             onClick={() => setActiveTab("database")}
             className={`px-4 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all duration-200 shrink-0 cursor-pointer ${
@@ -74,7 +103,7 @@ export default function App() {
             }`}
           >
             <Database className="w-4 h-4" />
-            Esquema Base de Datos (ERD)
+            Base de Datos
           </button>
           <button
             onClick={() => setActiveTab("api")}
@@ -85,18 +114,7 @@ export default function App() {
             }`}
           >
             <Globe className="w-4 h-4" />
-            Playground de API (Sandbox)
-          </button>
-          <button
-            onClick={() => setActiveTab("modules")}
-            className={`px-4 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all duration-200 shrink-0 cursor-pointer ${
-              activeTab === "modules"
-                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/15"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
-            }`}
-          >
-            <Layers className="w-4 h-4" />
-            Planos de 9 Módulos Core
+            Sandbox API
           </button>
           <button
             onClick={() => setActiveTab("portals")}
@@ -107,18 +125,7 @@ export default function App() {
             }`}
           >
             <Users className="w-4 h-4" />
-            Mockups de Portales
-          </button>
-          <button
-            onClick={() => setActiveTab("ai_advisor")}
-            className={`px-4 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all duration-200 shrink-0 cursor-pointer bg-slate-900 border border-slate-850 ${
-              activeTab === "ai_advisor"
-                ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-inner"
-                : "text-indigo-400 hover:text-indigo-300 hover:bg-slate-800/40"
-            }`}
-          >
-            <Cpu className="w-4 h-4 text-indigo-400" />
-            Consultor de Arquitectura IA
+            Mockups
           </button>
         </div>
 
@@ -130,6 +137,16 @@ export default function App() {
           {activeTab === "modules" && <ModuleBlueprint />}
           {activeTab === "portals" && <PortalPreviews />}
           {activeTab === "ai_advisor" && <AIAdvisor />}
+          {activeTab === "teacher_real" && (
+            <div className="bg-slate-100 rounded-xl overflow-hidden min-h-[600px]">
+              <TeacherPortal />
+            </div>
+          )}
+          {activeTab === "corporate_real" && (
+            <div className="bg-slate-50 rounded-xl overflow-hidden min-h-[600px]">
+              <CorporatePortal />
+            </div>
+          )}
         </div>
 
         {/* Compliance & Standards Footer Banner */}
