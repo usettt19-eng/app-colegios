@@ -3,6 +3,46 @@ import { supabaseAdmin } from "../supabase";
 
 const router = Router();
 
+// GET /api/v1/assignments?class_id=...
+// Lista las tareas creadas para una clase
+router.get("/", async (req: Request, res: Response) => {
+  try {
+    const { class_id } = req.query;
+    if (!class_id) return res.status(400).json({ error: "Falta class_id" });
+
+    const { data, error } = await supabaseAdmin
+      .from("assignments")
+      .select("*")
+      .eq("class_id", class_id)
+      .order("due_date", { ascending: false });
+
+    if (error) return res.status(500).json({ error: "Error al consultar las tareas." });
+    return res.status(200).json({ success: true, assignments: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/assignments:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// GET /api/v1/assignments/:id/submissions
+// Lista las entregas de los alumnos para una tarea (para calificar)
+router.get("/:id/submissions", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const { data, error } = await supabaseAdmin
+      .from("student_assignments")
+      .select("*, students(first_name, last_name)")
+      .eq("assignment_id", id);
+
+    if (error) return res.status(500).json({ error: "Error al consultar las entregas." });
+    return res.status(200).json({ success: true, submissions: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/assignments/:id/submissions:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // POST /api/v1/assignments
 // El profesor crea una nueva tarea para una clase
 router.post("/", async (req: Request, res: Response) => {

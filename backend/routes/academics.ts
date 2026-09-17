@@ -125,7 +125,7 @@ router.post("/courses", async (req: Request, res: Response) => {
 // GET /api/v1/academics/classes?tenant_id=...&term_id=...
 router.get("/classes", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, term_id } = req.query;
+    const { tenant_id, term_id, teacher_id } = req.query;
     if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
 
     let query = supabaseAdmin
@@ -134,6 +134,7 @@ router.get("/classes", async (req: Request, res: Response) => {
       .eq("tenant_id", tenant_id);
 
     if (term_id) query = query.eq("term_id", term_id);
+    if (teacher_id) query = query.eq("teacher_id", teacher_id);
 
     const { data, error } = await query.order("created_at", { ascending: false });
 
@@ -141,6 +142,34 @@ router.get("/classes", async (req: Request, res: Response) => {
     return res.status(200).json({ success: true, classes: data });
   } catch (error: any) {
     console.error("Error en GET /api/v1/academics/classes:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// GET /api/v1/academics/classes/:id/roster
+// Lista los alumnos matriculados en un grupo/clase específico (para pase de lista y calificaciones)
+router.get("/classes/:id/roster", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const { data, error } = await supabaseAdmin
+      .from("class_enrollments")
+      .select("id, final_grade, enrollments!inner(student_id, students(id, first_name, last_name))")
+      .eq("class_id", id);
+
+    if (error) return res.status(500).json({ error: "Error al consultar el roster de la clase." });
+
+    const roster = (data || []).map((ce: any) => ({
+      class_enrollment_id: ce.id,
+      final_grade: ce.final_grade,
+      student_id: ce.enrollments?.student_id,
+      first_name: ce.enrollments?.students?.first_name,
+      last_name: ce.enrollments?.students?.last_name,
+    }));
+
+    return res.status(200).json({ success: true, roster });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/academics/classes/:id/roster:", error);
     return res.status(500).json({ error: "Error interno" });
   }
 });

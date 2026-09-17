@@ -145,6 +145,65 @@ router.post("/purchase-orders/:id/status", async (req: Request, res: Response) =
 // MÓDULO DE ACTIVOS FIJOS (COMPUTADORAS/PATRIMONIO)
 // ==========================================
 
+// GET /api/v1/corporate/assets?tenant_id=...
+// Lista el inventario de activos fijos con su custodio actual (si tiene uno)
+router.get("/assets", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    const { data, error } = await supabaseAdmin
+      .from("fixed_assets")
+      .select("*, asset_assignments(assigned_to, returned_date, profiles(first_name, last_name))")
+      .eq("tenant_id", tenant_id)
+      .order("purchase_date", { ascending: false });
+
+    if (error) return res.status(500).json({ error: "Error al consultar los activos." });
+
+    // Solo nos interesa la asignación vigente (returned_date nulo) de cada activo
+    const assets = (data || []).map((asset: any) => ({
+      ...asset,
+      current_assignment: asset.asset_assignments?.find((a: any) => !a.returned_date) || null,
+      asset_assignments: undefined,
+    }));
+
+    return res.status(200).json({ success: true, assets });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/corporate/assets:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/corporate/assets
+// Registra un nuevo activo fijo en el patrimonio (laptop, proyector, mobiliario)
+router.post("/assets", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, asset_tag, name, category, purchase_value, purchase_date } = req.body;
+    if (!tenant_id || !asset_tag || !name) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, asset_tag, name)" });
+    }
+
+    const { data: asset, error } = await supabaseAdmin
+      .from("fixed_assets")
+      .insert({ tenant_id, asset_tag, name, category, purchase_value, purchase_date, condition: "new" })
+      .select()
+      .single();
+
+    if (error || !asset) {
+      console.error("Error al registrar el activo:", error);
+      if (error?.code === "23505") {
+        return res.status(400).json({ error: "Ya existe un activo con esa placa/código." });
+      }
+      return res.status(500).json({ error: "Error al registrar el activo." });
+    }
+
+    return res.status(201).json({ success: true, message: "Activo registrado en el patrimonio.", asset });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/corporate/assets:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // POST /api/v1/corporate/assets/assign
 // Asigna una laptop o proyector a un profesor
 router.post("/assets/assign", async (req: Request, res: Response) => {
@@ -183,6 +242,53 @@ router.post("/assets/assign", async (req: Request, res: Response) => {
 // MÓDULO DE CONSUMIBLES (CENTRO DE COSTOS)
 // ==========================================
 
+// GET /api/v1/corporate/consumables?tenant_id=...
+router.get("/consumables", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    const { data, error } = await supabaseAdmin
+      .from("consumables")
+      .select("*")
+      .eq("tenant_id", tenant_id)
+      .order("name");
+
+    if (error) return res.status(500).json({ error: "Error al consultar los consumibles." });
+    return res.status(200).json({ success: true, consumables: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/corporate/consumables:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/corporate/consumables
+// Da de alta un ítem en el catálogo de bodega (o su stock inicial)
+router.post("/consumables", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, name, unit_cost, stock_quantity, reorder_level } = req.body;
+    if (!tenant_id || !name || unit_cost === undefined) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, name, unit_cost)" });
+    }
+
+    const { data: consumable, error } = await supabaseAdmin
+      .from("consumables")
+      .insert({ tenant_id, name, unit_cost, stock_quantity: stock_quantity || 0, reorder_level: reorder_level ?? 5 })
+      .select()
+      .single();
+
+    if (error || !consumable) {
+      console.error("Error al crear el consumible:", error);
+      return res.status(500).json({ error: "Error al registrar el consumible." });
+    }
+
+    return res.status(201).json({ success: true, message: "Consumible agregado al catálogo de bodega.", consumable });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/corporate/consumables:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // POST /api/v1/corporate/consumables/dispatch
 // Entrega resmas de papel/marcadores a un profesor y lo carga a su departamento
 router.post("/consumables/dispatch", async (req: Request, res: Response) => {
@@ -215,13 +321,12 @@ router.post("/consumables/dispatch", async (req: Request, res: Response) => {
     });
 
     // 3. Descontar del Stock central
-    await supabaseAdmin.rpc("decrement_stock", { 
-      c_id: consumable_id, 
-      qty: quantity 
-    });
-    // Nota: decrement_stock sería una función SQL sencilla en Supabase para evitar condiciones de carrera.
-    // Como alternativa por SDK (menos segura para concurrencia):
-    // await supabaseAdmin.from("consumables").update({ stock_quantity: item.stock_quantity - quantity }).eq("id", consumable_id);
+    // Nota: idealmente esto sería un RPC atómico en Postgres para evitar condiciones
+    // de carrera bajo concurrencia; por ahora se hace vía SDK con el valor ya leído.
+    await supabaseAdmin
+      .from("consumables")
+      .update({ stock_quantity: item.stock_quantity - quantity })
+      .eq("id", consumable_id);
 
     return res.status(200).json({
       success: true,

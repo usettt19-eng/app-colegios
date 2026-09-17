@@ -1,19 +1,31 @@
 import React, { useEffect, useState } from 'react';
-import { Package, Monitor, Briefcase, TrendingDown, Plus, CheckCircle, Search, Laptop, PenTool, HardDrive, Wallet, Users, Calculator, Loader2, Truck, ShoppingCart } from 'lucide-react';
+import { Package, Monitor, Briefcase, TrendingDown, Plus, CheckCircle, Laptop, PenTool, HardDrive, Wallet, Users, Calculator, Loader2, Truck, ShoppingCart } from 'lucide-react';
 
-const MOCK_ASSETS = [
-  { id: '1', tag: 'IT-2026-001', name: 'MacBook Air M2', condition: 'Nuevo', assignedTo: 'Sin asignar' },
-  { id: '2', tag: 'IT-2026-002', name: 'Proyector Epson', condition: 'Bueno', assignedTo: 'Prof. Carlos Ruiz' },
-];
-
-const MOCK_CONSUMABLES = [
-  { id: '1', name: 'Resma Papel A4', stock: 45, unitCost: 4.50 },
-  { id: '2', name: 'Marcadores Pizarra (Caja)', stock: 12, unitCost: 8.00 },
-  { id: '3', name: 'Tinta Impresora Negra', stock: 3, unitCost: 25.00 }, // Low stock
-];
-
-// Contexto de demostración: en producción tenant_id viene del token JWT de Supabase Auth (Fase 2)
+// Contexto de demostración: en producción tenant_id / requested_by vienen del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = 'tenant-demo-123';
+const DEMO_REQUESTER_ID = 'staff-demo-123';
+
+interface FixedAsset {
+  id: string;
+  asset_tag: string;
+  name: string;
+  category: string | null;
+  condition: string;
+  current_assignment: { assigned_to: string; profiles?: { first_name: string; last_name: string } } | null;
+}
+
+interface ConsumableItem {
+  id: string;
+  name: string;
+  unit_cost: number;
+  stock_quantity: number;
+  reorder_level: number;
+}
+
+interface Department {
+  id: string;
+  name: string;
+}
 
 interface Employee {
   id: string;
@@ -59,6 +71,19 @@ export const CorporatePortal: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'assets' | 'consumables' | 'payroll' | 'procurement'>('assets');
   const [message, setMessage] = useState('');
 
+  // --- Patrimonio IT ---
+  const [assets, setAssets] = useState<FixedAsset[]>([]);
+  const [assetsLoading, setAssetsLoading] = useState(false);
+  const [assetForm, setAssetForm] = useState({ asset_tag: '', name: '', category: '', purchase_value: '' });
+  const [assignForm, setAssignForm] = useState<{ asset_tag: string; assigned_to_profile_id: string }>({ asset_tag: '', assigned_to_profile_id: '' });
+
+  // --- Bodega y Consumibles ---
+  const [consumables, setConsumables] = useState<ConsumableItem[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [consumablesLoading, setConsumablesLoading] = useState(false);
+  const [consumableForm, setConsumableForm] = useState({ name: '', unit_cost: '', stock_quantity: '' });
+  const [dispatchDeptByItem, setDispatchDeptByItem] = useState<Record<string, string>>({});
+
   // --- Proveedores y Compras ---
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
@@ -95,7 +120,164 @@ export const CorporatePortal: React.FC = () => {
   useEffect(() => {
     if (activeTab === 'payroll') loadPayrollData();
     if (activeTab === 'procurement') loadProcurementData();
+    if (activeTab === 'assets') loadAssets();
+    if (activeTab === 'consumables') loadConsumables();
   }, [activeTab]);
+
+  const loadAssets = async () => {
+    setAssetsLoading(true);
+    try {
+      const response = await fetch(`/api/v1/corporate/assets?tenant_id=${DEMO_TENANT_ID}`);
+      const data = await response.json();
+      setAssets(data.assets || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+    setAssetsLoading(false);
+  };
+
+  const handleCreateAsset = async () => {
+    if (!assetForm.asset_tag || !assetForm.name) {
+      setMessage('❌ Indica la placa y el nombre del activo.');
+      return;
+    }
+    setAssetsLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/corporate/assets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          asset_tag: assetForm.asset_tag,
+          name: assetForm.name,
+          category: assetForm.category || null,
+          purchase_value: assetForm.purchase_value ? Number(assetForm.purchase_value) : null,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Activo registrado en el patrimonio.');
+        setAssetForm({ asset_tag: '', name: '', category: '', purchase_value: '' });
+        loadAssets();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo registrar el activo.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setAssetsLoading(false);
+  };
+
+  const handleAssignAssetTo = async (tag: string) => {
+    const assignedTo = assignForm.asset_tag === tag ? assignForm.assigned_to_profile_id : '';
+    if (!assignedTo) {
+      setMessage('❌ Indica el ID de perfil del staff que recibirá el equipo.');
+      return;
+    }
+    setAssetsLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/corporate/assets/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, asset_tag: tag, assigned_to_profile_id: assignedTo }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage(`✅ Equipo ${tag} asignado correctamente.`);
+        setAssignForm({ asset_tag: '', assigned_to_profile_id: '' });
+        loadAssets();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo asignar el activo.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setAssetsLoading(false);
+  };
+
+  const loadConsumables = async () => {
+    setConsumablesLoading(true);
+    try {
+      const [consumablesRes, deptRes] = await Promise.all([
+        fetch(`/api/v1/corporate/consumables?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/hierarchy/departments?tenant_id=${DEMO_TENANT_ID}`),
+      ]);
+      const consumablesData = await consumablesRes.json();
+      const deptData = await deptRes.json();
+      setConsumables(consumablesData.consumables || []);
+      setDepartments(deptData.departments || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+    setConsumablesLoading(false);
+  };
+
+  const handleCreateConsumable = async () => {
+    if (!consumableForm.name || !consumableForm.unit_cost) {
+      setMessage('❌ Indica el nombre y el costo unitario del ítem.');
+      return;
+    }
+    setConsumablesLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/corporate/consumables', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          name: consumableForm.name,
+          unit_cost: Number(consumableForm.unit_cost),
+          stock_quantity: consumableForm.stock_quantity ? Number(consumableForm.stock_quantity) : 0,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Ítem agregado al catálogo de bodega.');
+        setConsumableForm({ name: '', unit_cost: '', stock_quantity: '' });
+        loadConsumables();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo agregar el ítem.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setConsumablesLoading(false);
+  };
+
+  const handleDispatchConsumableReal = async (item: ConsumableItem) => {
+    const departmentId = dispatchDeptByItem[item.id];
+    if (!departmentId) {
+      setMessage('❌ Selecciona el departamento que recibirá el consumible.');
+      return;
+    }
+    setConsumablesLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/corporate/consumables/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          consumable_id: item.id,
+          department_id: departmentId,
+          requested_by_profile_id: DEMO_REQUESTER_ID,
+          quantity: 1,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('📦 ' + data.message);
+        loadConsumables();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo despachar el consumible.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setConsumablesLoading(false);
+  };
 
   const loadProcurementData = async () => {
     try {
@@ -285,18 +467,6 @@ export const CorporatePortal: React.FC = () => {
     }
   };
 
-  const handleAssignAsset = async (tag: string) => {
-    // Simulando llamada a /api/v1/corporate/assets/assign
-    setMessage(`✅ Equipo ${tag} asignado correctamente a Prof. Ana Gómez.`);
-    setTimeout(() => setMessage(''), 4000);
-  };
-
-  const handleDispatchConsumable = async (name: string, cost: number) => {
-    // Simulando llamada a /api/v1/corporate/consumables/dispatch
-    setMessage(`📦 Se descontó 1 unidad de ${name}. Cargo de $${cost.toFixed(2)} registrado al Depto. de Ciencias.`);
-    setTimeout(() => setMessage(''), 4000);
-  };
-
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6 text-slate-800">
       
@@ -349,96 +519,199 @@ export const CorporatePortal: React.FC = () => {
 
       {/* Activos IT */}
       {activeTab === 'assets' && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-              <input type="text" placeholder="Buscar placa (ej: IT-2026-001)" className="pl-9 pr-4 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 w-64" />
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+            <h2 className="font-bold text-slate-700 flex items-center mb-3"><Plus className="w-4 h-4 mr-2 text-blue-600" /> Registrar Nuevo Activo</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <input
+                type="text" placeholder="Placa (ej. IT-2026-003)" value={assetForm.asset_tag}
+                onChange={e => setAssetForm({ ...assetForm, asset_tag: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="text" placeholder="Nombre del equipo" value={assetForm.name}
+                onChange={e => setAssetForm({ ...assetForm, name: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="text" placeholder="Categoría (IT, Mobiliario...)" value={assetForm.category}
+                onChange={e => setAssetForm({ ...assetForm, category: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="number" placeholder="Valor de compra" value={assetForm.purchase_value}
+                onChange={e => setAssetForm({ ...assetForm, purchase_value: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
             </div>
-            <button className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-sm font-semibold flex items-center">
-              <Plus className="w-4 h-4 mr-1" /> Registrar Nuevo Activo
+            <button
+              onClick={handleCreateAsset}
+              disabled={assetsLoading}
+              className="mt-3 flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm"
+            >
+              {assetsLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+              Registrar Activo
             </button>
           </div>
-          
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
-              <tr>
-                <th className="px-4 py-3 font-semibold">CÓDIGO (PLACA)</th>
-                <th className="px-4 py-3 font-semibold">EQUIPO</th>
-                <th className="px-4 py-3 font-semibold">ESTADO</th>
-                <th className="px-4 py-3 font-semibold">ASIGNADO A</th>
-                <th className="px-4 py-3 font-semibold text-right">ACCIÓN</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {MOCK_ASSETS.map((asset) => (
-                <tr key={asset.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-mono font-bold text-slate-600">{asset.tag}</td>
-                  <td className="px-4 py-3 flex items-center gap-2">
-                    {asset.name.includes('MacBook') ? <Laptop className="w-4 h-4 text-slate-400" /> : <HardDrive className="w-4 h-4 text-slate-400" />}
-                    {asset.name}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">{asset.condition}</span>
-                  </td>
-                  <td className="px-4 py-3 text-slate-500">{asset.assignedTo}</td>
-                  <td className="px-4 py-3 text-right">
-                    {asset.assignedTo === 'Sin asignar' && (
-                      <button 
-                        onClick={() => handleAssignAsset(asset.tag)}
-                        className="text-blue-600 font-bold hover:text-blue-800 bg-blue-50 px-3 py-1 rounded"
-                      >
-                        Asignar al Staff
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50">
+              <h2 className="font-bold text-slate-700">Inventario de Patrimonio</h2>
+            </div>
+            {assets.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay activos registrados.</p>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">CÓDIGO (PLACA)</th>
+                    <th className="px-4 py-3 font-semibold">EQUIPO</th>
+                    <th className="px-4 py-3 font-semibold">ESTADO</th>
+                    <th className="px-4 py-3 font-semibold">ASIGNADO A</th>
+                    <th className="px-4 py-3 font-semibold text-right">ACCIÓN</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {assets.map((asset) => (
+                    <tr key={asset.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-mono font-bold text-slate-600">{asset.asset_tag}</td>
+                      <td className="px-4 py-3 flex items-center gap-2">
+                        {asset.name.toLowerCase().includes('mac') || asset.name.toLowerCase().includes('laptop')
+                          ? <Laptop className="w-4 h-4 text-slate-400" /> : <HardDrive className="w-4 h-4 text-slate-400" />}
+                        {asset.name}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">{asset.condition}</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">
+                        {asset.current_assignment
+                          ? (asset.current_assignment.profiles
+                              ? `${asset.current_assignment.profiles.first_name} ${asset.current_assignment.profiles.last_name}`
+                              : 'Asignado')
+                          : 'Sin asignar'}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {!asset.current_assignment && (
+                          assignForm.asset_tag === asset.asset_tag ? (
+                            <div className="flex items-center justify-end gap-2">
+                              <input
+                                type="text" placeholder="ID de perfil" value={assignForm.assigned_to_profile_id}
+                                onChange={e => setAssignForm({ ...assignForm, assigned_to_profile_id: e.target.value })}
+                                className="border border-slate-300 rounded-md px-2 py-1 text-xs w-32"
+                              />
+                              <button
+                                onClick={() => handleAssignAssetTo(asset.asset_tag)}
+                                disabled={assetsLoading}
+                                className="text-blue-600 font-bold hover:text-blue-800 bg-blue-50 px-3 py-1 rounded disabled:opacity-50"
+                              >
+                                Confirmar
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setAssignForm({ asset_tag: asset.asset_tag, assigned_to_profile_id: '' })}
+                              className="text-blue-600 font-bold hover:text-blue-800 bg-blue-50 px-3 py-1 rounded"
+                            >
+                              Asignar al Staff
+                            </button>
+                          )
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
 
       {/* Consumibles */}
       {activeTab === 'consumables' && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-             <h2 className="font-bold text-slate-700 flex items-center"><TrendingDown className="w-4 h-4 mr-2 text-rose-500" /> Centro de Costos / Egresos de Bodega</h2>
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+            <h2 className="font-bold text-slate-700 flex items-center mb-3"><Plus className="w-4 h-4 mr-2 text-blue-600" /> Agregar Ítem al Catálogo</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input
+                type="text" placeholder="Nombre del ítem" value={consumableForm.name}
+                onChange={e => setConsumableForm({ ...consumableForm, name: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="number" placeholder="Costo unitario" value={consumableForm.unit_cost}
+                onChange={e => setConsumableForm({ ...consumableForm, unit_cost: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="number" placeholder="Stock inicial" value={consumableForm.stock_quantity}
+                onChange={e => setConsumableForm({ ...consumableForm, stock_quantity: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              onClick={handleCreateConsumable}
+              disabled={consumablesLoading}
+              className="mt-3 flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm"
+            >
+              {consumablesLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+              Agregar Ítem
+            </button>
           </div>
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
-              <tr>
-                <th className="px-4 py-3 font-semibold">ITEM</th>
-                <th className="px-4 py-3 font-semibold">COSTO UNITARIO</th>
-                <th className="px-4 py-3 font-semibold">STOCK ACTUAL</th>
-                <th className="px-4 py-3 font-semibold text-right">DESPACHO</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {MOCK_CONSUMABLES.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 flex items-center gap-2">
-                    <PenTool className="w-4 h-4 text-slate-400" />
-                    <span className="font-medium">{item.name}</span>
-                  </td>
-                  <td className="px-4 py-3 text-slate-500">${item.unitCost.toFixed(2)}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded-full text-xs font-bold ${item.stock <= 5 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                      {item.stock} unidades {item.stock <= 5 && '(¡Bajo!)'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => handleDispatchConsumable(item.name, item.unitCost)}
-                      className="text-indigo-600 font-bold hover:text-indigo-800 bg-indigo-50 px-3 py-1 rounded border border-indigo-200"
-                    >
-                      Despachar 1 ud.
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h2 className="font-bold text-slate-700 flex items-center"><TrendingDown className="w-4 h-4 mr-2 text-rose-500" /> Centro de Costos / Egresos de Bodega</h2>
+            </div>
+            {consumables.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay ítems en el catálogo de bodega.</p>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">ITEM</th>
+                    <th className="px-4 py-3 font-semibold">COSTO UNITARIO</th>
+                    <th className="px-4 py-3 font-semibold">STOCK ACTUAL</th>
+                    <th className="px-4 py-3 font-semibold text-right">DESPACHO</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {consumables.map((item) => (
+                    <tr key={item.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 flex items-center gap-2">
+                        <PenTool className="w-4 h-4 text-slate-400" />
+                        <span className="font-medium">{item.name}</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">${Number(item.unit_cost).toFixed(2)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${item.stock_quantity <= item.reorder_level ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                          {item.stock_quantity} unidades {item.stock_quantity <= item.reorder_level && '(¡Bajo!)'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <select
+                            value={dispatchDeptByItem[item.id] || ''}
+                            onChange={e => setDispatchDeptByItem({ ...dispatchDeptByItem, [item.id]: e.target.value })}
+                            className="border border-slate-300 rounded-md px-2 py-1 text-xs"
+                          >
+                            <option value="">Depto...</option>
+                            {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                          </select>
+                          <button
+                            onClick={() => handleDispatchConsumableReal(item)}
+                            disabled={consumablesLoading}
+                            className="text-indigo-600 font-bold hover:text-indigo-800 bg-indigo-50 px-3 py-1 rounded border border-indigo-200 disabled:opacity-50"
+                          >
+                            Despachar 1 ud.
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
 
