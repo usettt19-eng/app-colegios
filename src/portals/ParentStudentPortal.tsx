@@ -6,11 +6,8 @@ import { PaymentCenter } from './PaymentCenter';
 import { AgendaCalendar } from './AgendaCalendar';
 import { MessagingInbox } from './MessagingInbox';
 import { GuardianInfoForm } from './GuardianInfoForm';
-
-// Contexto de demostración: en producción estos IDs vienen del token JWT de Supabase Auth (Fase 2)
-const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
-const DEMO_STUDENT_ID = '22222222-2222-2222-2222-222222222222';
-const DEMO_PARENT_ID = '33333333-3333-3333-3333-333333333333';
+import { useAuth } from '../contexts/AuthContext';
+import { LoginPage } from './LoginPage';
 
 const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
@@ -66,7 +63,20 @@ interface ReportCard {
   report_card_details?: { final_score: number; classes?: { name: string } }[];
 }
 
-export const ParentStudentPortal: React.FC = () => {
+interface InnerProps {
+  tenantId: string;
+  studentId: string;
+  parentId: string;
+  parentName: string;
+  childrenOptions: { id: string; first_name: string; last_name: string }[];
+  onChangeStudent: (id: string) => void;
+  onSignOut: () => void;
+}
+
+const ParentStudentPortalInner: React.FC<InnerProps> = ({ tenantId, studentId, parentId, parentName, childrenOptions, onChangeStudent, onSignOut }) => {
+  const DEMO_TENANT_ID = tenantId;
+  const DEMO_STUDENT_ID = studentId;
+  const DEMO_PARENT_ID = parentId;
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [reportCards, setReportCards] = useState<ReportCard[]>([]);
@@ -359,6 +369,27 @@ export const ParentStudentPortal: React.FC = () => {
             <h1 className="text-2xl font-black text-slate-800">Portal de Padres y Alumnos</h1>
             <p className="text-sm text-slate-500">Calificaciones, boletines, contratos y colegiaturas</p>
           </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {childrenOptions.length > 1 && (
+            <select
+              value={studentId}
+              onChange={e => onChangeStudent(e.target.value)}
+              className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              {childrenOptions.map(c => <option key={c.id} value={c.id}>{c.first_name} {c.last_name}</option>)}
+            </select>
+          )}
+          <div className="text-right hidden sm:block">
+            <p className="text-sm font-bold text-slate-700">{parentName}</p>
+            <p className="text-xs text-slate-400">Sesión iniciada</p>
+          </div>
+          <button
+            onClick={onSignOut}
+            className="px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 rounded-md border border-slate-200"
+          >
+            Cerrar Sesión
+          </button>
         </div>
       </div>
 
@@ -852,5 +883,64 @@ export const ParentStudentPortal: React.FC = () => {
         </>
       )}
     </div>
+  );
+};
+
+export const ParentStudentPortal: React.FC = () => {
+  const { session, profile, children: authChildren, loading, signOut } = useAuth();
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedStudentId && authChildren.length > 0) setSelectedStudentId(authChildren[0].id);
+  }, [authChildren, selectedStudentId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-24 text-slate-400">
+        <Loader2 className="w-6 h-6 mr-2 animate-spin" /> Verificando sesión...
+      </div>
+    );
+  }
+
+  if (!session || !profile) {
+    return <LoginPage />;
+  }
+
+  if (profile.role !== 'parent') {
+    return (
+      <div className="p-6 max-w-md mx-auto text-center">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-sm text-amber-800">
+          Esta cuenta ({profile.email}) no tiene el rol de padre/madre/acudiente, así que no puede ver el Portal de Padres.
+        </div>
+        <button onClick={signOut} className="mt-4 px-4 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 rounded-md border border-slate-200">
+          Cerrar Sesión
+        </button>
+      </div>
+    );
+  }
+
+  if (authChildren.length === 0 || !selectedStudentId) {
+    return (
+      <div className="p-6 max-w-md mx-auto text-center space-y-4">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-sm text-amber-800">
+          No hay ningún alumno vinculado a esta cuenta todavía.
+        </div>
+        <button onClick={signOut} className="px-4 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 rounded-md border border-slate-200">
+          Cerrar Sesión
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <ParentStudentPortalInner
+      tenantId={profile.tenant_id}
+      studentId={selectedStudentId}
+      parentId={profile.id}
+      parentName={`${profile.first_name} ${profile.last_name}`}
+      childrenOptions={authChildren}
+      onChangeStudent={setSelectedStudentId}
+      onSignOut={signOut}
+    />
   );
 };

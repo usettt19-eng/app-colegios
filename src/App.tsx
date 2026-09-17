@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Network, Database, Globe, Layers, Users, Cpu, ShieldCheck, HelpCircle, Server, FileCode, CheckCircle2, UserCircle, Briefcase, GraduationCap, ClipboardList, Settings2 } from "lucide-react";
+import { Network, Database, Globe, Layers, Users, Cpu, ShieldCheck, HelpCircle, Server, FileCode, CheckCircle2, UserCircle, Briefcase, GraduationCap, ClipboardList, Settings2, Crown } from "lucide-react";
 import ArchitectureVisualizer from "./components/ArchitectureVisualizer";
 import DatabaseSchemaExplorer from "./components/DatabaseSchemaExplorer";
 import APIPlayground from "./components/APIPlayground";
@@ -11,10 +11,20 @@ import { CorporatePortal } from "./portals/CorporatePortal";
 import { ParentStudentPortal } from "./portals/ParentStudentPortal";
 import { AdmissionsPortal } from "./portals/AdmissionsPortal";
 import { AdminAdvancedPortal } from "./portals/AdminAdvancedPortal";
+import { SuperAdminPortal } from "./portals/SuperAdminPortal";
+import { AuthProvider } from "./contexts/AuthContext";
 
-type TabId = "diagram" | "database" | "api" | "modules" | "portals" | "ai_advisor" | "teacher_real" | "corporate_real" | "parent_real" | "admissions_real" | "admin_real";
+type TabId = "diagram" | "database" | "api" | "modules" | "portals" | "ai_advisor" | "teacher_real" | "corporate_real" | "parent_real" | "admissions_real" | "admin_real" | "superadmin_real";
 
 export default function App() {
+  return (
+    <AuthProvider>
+      <AppShell />
+    </AuthProvider>
+  );
+}
+
+function AppShell() {
   const [activeTab, setActiveTab] = useState<TabId>("diagram");
 
   return (
@@ -136,6 +146,19 @@ export default function App() {
             VER PORTAL ADMIN
           </button>
 
+          {/* Super Admin Portal (Fase 2: Auth real) */}
+          <button
+            onClick={() => setActiveTab("superadmin_real")}
+            className={`px-4 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all duration-200 shrink-0 cursor-pointer ${
+              activeTab === "superadmin_real"
+                ? "bg-slate-700 text-white shadow-lg shadow-slate-700/15"
+                : "text-slate-300 hover:text-white hover:bg-slate-800/40 border border-slate-700/30"
+            }`}
+          >
+            <Crown className="w-4 h-4" />
+            VER SUPER ADMIN
+          </button>
+
           <button
             onClick={() => setActiveTab("database")}
             className={`px-4 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all duration-200 shrink-0 cursor-pointer ${
@@ -202,6 +225,11 @@ export default function App() {
           {activeTab === "admin_real" && (
             <div className="bg-slate-50 rounded-xl overflow-hidden min-h-[600px]">
               <AdminAdvancedPortal />
+            </div>
+          )}
+          {activeTab === "superadmin_real" && (
+            <div className="bg-slate-50 rounded-xl overflow-hidden min-h-[600px]">
+              <SuperAdminPortal />
             </div>
           )}
         </div>
