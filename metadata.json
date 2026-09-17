@@ -1,0 +1,6 @@
+{
+  "name": "SIS Architect & Academic ERP Workbench",
+  "description": "Interactive architecture diagram, ER database schema explorer, external REST API sandbox, and Gemini-powered EdTech software architect advisor for School Information Systems.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
