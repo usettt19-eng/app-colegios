@@ -1,5 +1,6 @@
 import { Request, Response, Router } from "express";
 import { supabaseAdmin } from "../supabase";
+import { uploadProfilePhoto } from "../services/photoStorage";
 
 const router = Router();
 
@@ -15,13 +16,25 @@ router.post("/", async (req: Request, res: Response) => {
 
     const { data: student, error } = await supabaseAdmin
       .from("students")
-      .insert({ tenant_id, first_name, last_name, grade, section, photo_url: photo_url || null })
+      .insert({ tenant_id, first_name, last_name, grade, section })
       .select()
       .single();
 
     if (error || !student) {
       console.error("Error al crear alumno:", error);
       return res.status(500).json({ error: "Error al registrar el expediente del alumno." });
+    }
+
+    // La foto llega como data URL desde el navegador; se sube a Storage y
+    // se guarda la URL pública resultante (no el base64) en photo_url.
+    if (photo_url) {
+      try {
+        const publicUrl = await uploadProfilePhoto(photo_url, tenant_id, "students", student.id);
+        await supabaseAdmin.from("students").update({ photo_url: publicUrl }).eq("id", student.id);
+        student.photo_url = publicUrl;
+      } catch (photoError: any) {
+        console.error("Error al subir la foto del alumno:", photoError);
+      }
     }
 
     if (parent_id) {
@@ -63,17 +76,24 @@ router.get("/:id", async (req: Request, res: Response) => {
 });
 
 // POST /api/v1/students/:id/photo
-// Actualiza la foto del expediente del alumno
+// Sube (o reemplaza) la foto del expediente del alumno al bucket profile_photos
 router.post("/:id/photo", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { photo_url } = req.body;
+    const { tenant_id, photo_url } = req.body;
 
-    if (!photo_url) return res.status(400).json({ error: "Falta photo_url" });
+    if (!tenant_id || !photo_url) return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, photo_url)" });
+
+    let publicUrl: string;
+    try {
+      publicUrl = await uploadProfilePhoto(photo_url, tenant_id, "students", id);
+    } catch (photoError: any) {
+      return res.status(400).json({ error: photoError.message || "No se pudo procesar la foto." });
+    }
 
     const { data: student, error } = await supabaseAdmin
       .from("students")
-      .update({ photo_url })
+      .update({ photo_url: publicUrl })
       .eq("id", id)
       .select()
       .single();

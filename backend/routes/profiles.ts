@@ -1,5 +1,6 @@
 import { Request, Response, Router } from "express";
 import { supabaseAdmin } from "../supabase";
+import { uploadProfilePhoto } from "../services/photoStorage";
 
 const router = Router();
 
@@ -25,17 +26,24 @@ router.get("/:id", async (req: Request, res: Response) => {
 });
 
 // POST /api/v1/profiles/:id/photo
-// Actualiza la foto de un padre/staff en su expediente
+// Sube (o reemplaza) la foto de un padre/staff al bucket profile_photos
 router.post("/:id/photo", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { photo_url } = req.body;
+    const { tenant_id, photo_url } = req.body;
 
-    if (!photo_url) return res.status(400).json({ error: "Falta photo_url" });
+    if (!tenant_id || !photo_url) return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, photo_url)" });
+
+    let publicUrl: string;
+    try {
+      publicUrl = await uploadProfilePhoto(photo_url, tenant_id, "profiles", id);
+    } catch (photoError: any) {
+      return res.status(400).json({ error: photoError.message || "No se pudo procesar la foto." });
+    }
 
     const { data: profile, error } = await supabaseAdmin
       .from("profiles")
-      .update({ photo_url })
+      .update({ photo_url: publicUrl })
       .eq("id", id)
       .select()
       .single();

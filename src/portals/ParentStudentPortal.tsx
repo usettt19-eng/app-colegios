@@ -116,11 +116,11 @@ export const ParentStudentPortal: React.FC = () => {
       const response = await fetch(`/api/v1/students/${DEMO_STUDENT_ID}/photo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ photo_url: dataUrl }),
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, photo_url: dataUrl }),
       });
       const data = await response.json();
       if (data.success) {
-        setStudentPhoto(dataUrl);
+        setStudentPhoto(data.student?.photo_url || dataUrl);
         setMessage('✅ Foto del alumno actualizada.');
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo actualizar la foto.'));
@@ -140,11 +140,11 @@ export const ParentStudentPortal: React.FC = () => {
       const response = await fetch(`/api/v1/profiles/${DEMO_PARENT_ID}/photo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ photo_url: dataUrl }),
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, photo_url: dataUrl }),
       });
       const data = await response.json();
       if (data.success) {
-        setParentPhoto(dataUrl);
+        setParentPhoto(data.profile?.photo_url || dataUrl);
         setMessage('✅ Tu foto de perfil fue actualizada.');
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo actualizar la foto.'));
