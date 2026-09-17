@@ -29,6 +29,38 @@ router.get("/invoices/:student_id", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/v1/finance/payments/:student_id
+// Lista los comprobantes de pago (recibos) del alumno, para la pestaña "Comprobantes"
+router.get("/payments/:student_id", async (req: Request, res: Response) => {
+  try {
+    const { student_id } = req.params;
+
+    const { data: invoices } = await supabaseAdmin
+      .from("invoices")
+      .select("id")
+      .eq("student_id", student_id);
+
+    const invoiceIds = (invoices || []).map(inv => inv.id);
+    if (invoiceIds.length === 0) return res.status(200).json({ success: true, payments: [] });
+
+    const { data, error } = await supabaseAdmin
+      .from("payments")
+      .select("*, invoices(invoice_number)")
+      .in("invoice_id", invoiceIds)
+      .order("payment_date", { ascending: false });
+
+    if (error) {
+      console.error("Error al consultar comprobantes de pago:", error);
+      return res.status(500).json({ error: "Error al consultar los comprobantes de pago." });
+    }
+
+    return res.status(200).json({ success: true, payments: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/finance/payments/:student_id:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // POST /api/v1/finance/checkout/yappy
 // Inicia el flujo de pago a través de Yappy (Banco General Panamá)
 router.post("/checkout/yappy", async (req: Request, res: Response) => {
