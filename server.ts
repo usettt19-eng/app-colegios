@@ -52,6 +52,7 @@ import bulkImportRoutes from "./backend/routes/bulkImport";
 import transportRoutes from "./backend/routes/transport";
 import corporateRoutes from "./backend/routes/corporate";
 import { startAutoReleaseJob } from "./backend/jobs/autoRelease";
+import { startRecurringExpenseReminderJob } from "./backend/jobs/recurringExpenseReminders";
 
 const app = express();
 app.use(express.json());
@@ -83,6 +84,7 @@ app.use("/api/v1/corporate", corporateRoutes);
 
 // Iniciar procesos en segundo plano
 startAutoReleaseJob();
+startRecurringExpenseReminderJob();
 
 // API: Health status check
 app.get("/api/health", (req, res) => {
