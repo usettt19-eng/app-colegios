@@ -95,14 +95,14 @@ router.get("/courses", async (req: Request, res: Response) => {
 // masivamente después con POST /courses/:id/generate-groups.
 router.post("/courses", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, code, name, description, credits, grade_level_ids } = req.body;
+    const { tenant_id, code, name, area, description, credits, grade_level_ids } = req.body;
     if (!tenant_id || !code || !name) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, code, name)" });
     }
 
     const { data: course, error } = await supabaseAdmin
       .from("courses")
-      .insert({ tenant_id, code, name, description, credits })
+      .insert({ tenant_id, code, name, area: area || null, description, credits })
       .select()
       .single();
 
@@ -123,6 +123,46 @@ router.post("/courses", async (req: Request, res: Response) => {
     return res.status(201).json({ success: true, message: "Curso creado en el catálogo.", course });
   } catch (error: any) {
     console.error("Error en POST /api/v1/academics/courses:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/academics/courses/:id/grade-levels
+// Marca (agrega) un grado a la matriz de plan de estudios de este curso.
+router.post("/courses/:id/grade-levels", async (req: Request, res: Response) => {
+  try {
+    const { id: course_id } = req.params;
+    const { tenant_id, grade_level_id } = req.body;
+    if (!tenant_id || !grade_level_id) return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, grade_level_id)" });
+
+    const { error } = await supabaseAdmin
+      .from("course_grade_levels")
+      .upsert({ tenant_id, course_id, grade_level_id }, { onConflict: "course_id, grade_level_id" });
+
+    if (error) return res.status(500).json({ error: "No se pudo marcar el grado para este curso." });
+    return res.status(200).json({ success: true });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/academics/courses/:id/grade-levels:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// DELETE /api/v1/academics/courses/:id/grade-levels/:gradeLevelId
+// Desmarca (quita) un grado de la matriz de plan de estudios de este curso.
+router.delete("/courses/:id/grade-levels/:gradeLevelId", async (req: Request, res: Response) => {
+  try {
+    const { id: course_id, gradeLevelId } = req.params;
+
+    const { error } = await supabaseAdmin
+      .from("course_grade_levels")
+      .delete()
+      .eq("course_id", course_id)
+      .eq("grade_level_id", gradeLevelId);
+
+    if (error) return res.status(500).json({ error: "No se pudo desmarcar el grado para este curso." });
+    return res.status(200).json({ success: true });
+  } catch (error: any) {
+    console.error("Error en DELETE /api/v1/academics/courses/:id/grade-levels/:gradeLevelId:", error);
     return res.status(500).json({ error: "Error interno" });
   }
 });

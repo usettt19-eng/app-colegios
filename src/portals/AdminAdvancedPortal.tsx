@@ -4,6 +4,7 @@ import { StudentDirectory } from './StudentDirectory';
 import { ParentDirectory } from './ParentDirectory';
 import { BulkImport } from './BulkImport';
 import { TransportManager } from './TransportManager';
+import { CurriculumMatrix } from './CurriculumMatrix';
 
 // Contexto de demostración: en producción tenant_id viene del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -63,6 +64,7 @@ interface Course {
   id: string;
   code: string;
   name: string;
+  area: string | null;
   credits: number | null;
   course_grade_levels?: { grade_level_id: string; grade_levels: { id: string; name: string } | null }[];
 }
@@ -109,7 +111,7 @@ export const AdminAdvancedPortal: React.FC = () => {
   const [classes, setClasses] = useState<ClassGroup[]>([]);
 
   const [termForm, setTermForm] = useState({ name: '', start_date: '', end_date: '', is_active: false });
-  const [courseForm, setCourseForm] = useState({ code: '', name: '', credits: '' });
+  const [courseForm, setCourseForm] = useState({ code: '', name: '', area: '', credits: '' });
   const [courseGradeLevelIds, setCourseGradeLevelIds] = useState<string[]>([]);
   const [generateGroupsForm, setGenerateGroupsForm] = useState<Record<string, { term_id: string; teacher_id: string }>>({});
   const [generatingGroupsCourseId, setGeneratingGroupsCourseId] = useState<string | null>(null);
@@ -582,6 +584,7 @@ export const AdminAdvancedPortal: React.FC = () => {
           tenant_id: DEMO_TENANT_ID,
           code: courseForm.code,
           name: courseForm.name,
+          area: courseForm.area || null,
           credits: courseForm.credits ? Number(courseForm.credits) : null,
           grade_level_ids: courseGradeLevelIds,
         }),
@@ -589,7 +592,7 @@ export const AdminAdvancedPortal: React.FC = () => {
       const data = await response.json();
       if (data.success) {
         setMessage('✅ Curso agregado al catálogo académico.');
-        setCourseForm({ code: '', name: '', credits: '' });
+        setCourseForm({ code: '', name: '', area: '', credits: '' });
         setCourseGradeLevelIds([]);
         loadAll();
       } else {
@@ -892,6 +895,11 @@ export const AdminAdvancedPortal: React.FC = () => {
                 className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
               />
               <input
+                type="text" placeholder="Área curricular (ej. Humanística, Científica...)" value={courseForm.area}
+                onChange={e => setCourseForm({ ...courseForm, area: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <input
                 type="number" placeholder="Créditos" value={courseForm.credits}
                 onChange={e => setCourseForm({ ...courseForm, credits: e.target.value })}
                 className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
@@ -992,6 +1000,14 @@ export const AdminAdvancedPortal: React.FC = () => {
                 Crear Grupo
               </button>
             </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50">
+              <h2 className="font-bold text-slate-700">Matriz de Plan de Estudios</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Clic en una celda para marcar/desmarcar si esa materia aplica a ese grado.</p>
+            </div>
+            <CurriculumMatrix tenantId={DEMO_TENANT_ID} courses={courses} gradeLevels={gradeLevels} onChanged={loadAll} />
           </div>
 
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">

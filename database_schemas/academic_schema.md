@@ -54,6 +54,7 @@ CREATE TABLE public.courses (
     tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
     code TEXT NOT NULL,
     name TEXT NOT NULL,
+    area TEXT, -- Área curricular (ej. "Humanística", "Científica", "Tecnológica"), para agrupar en la matriz de plan de estudios
     description TEXT,
     credits DECIMAL(3,1),
     created_at TIMESTAMPTZ DEFAULT now(),
