@@ -125,7 +125,37 @@ El usuario está pegando, sección por sección, una lista de posibles mejoras p
   - Exámenes de Admisión en Línea: prueba diagnóstica básica que el prospecto rinde directamente en el portal antes de ser aceptado.
   - Firma Electrónica de Contratos: integración con DocuSign (o firma interna) para el "Contrato de Servicios Educativos" anual, sin papel en la matrícula.
 
-*(Pendiente de que el usuario siga pegando el resto de las secciones — se irán agregando aquí en el mismo formato antes de decidir qué se construye.)*
+**Portal de Padres y Experiencia Familiar**
+- Core:
+  - Módulo de Enfermería / Ficha Médica: alergias, medicamentos permitidos, contactos de emergencia; bitácora de visitas a la enfermería con alerta automática por email/app al padre.
+  - Control de Morosidad Restrictivo: si el padre debe más de X meses, el sistema bloquea automáticamente ver calificaciones o descargar el boletín (común en colegios privados). *Nota: hoy Centro de Pagos ya calcula pendiente por cobrar; esto agregaría un bloqueo activo en Notas/Boletín según ese saldo.*
+- Avanzado (diferenciadores):
+  - Billetera Virtual / Cafetería (POS): el padre recarga saldo en el portal, el alumno compra en la cafetería con carnet (RFID/QR) sin efectivo.
+  - Integración con WhatsApp (API oficial): recordatorios de pago y alertas de inasistencia por WhatsApp en vez de solo correo.
+  - Geolocalización de Buses en Tiempo Real: mapa tipo Uber para que el padre vea el bus escolar en vivo (Google Maps API + GPS). *Nota: ya existe el módulo de Transporte (buses/paradas/asignación), pero sin tracking en vivo.*
+
+**Finanzas, Compras y Contabilidad**
+- Core:
+  - Gestión de Becas, Descuentos y Convenios: motor de reglas (ej. "10% por segundo hermano", "Beca Deportiva 50%") aplicado automáticamente por el generador mensual de facturas.
+  - Notas de Crédito y Anulaciones: flujo contable legal para cancelar facturas emitidas por error.
+- Avanzado (diferenciadores):
+  - Integración Bancaria (reconciliación automática): subir extracto bancario CSV/Excel y hacer match automático depósito↔factura por número de referencia.
+  - Control de Presupuesto Anual por departamento: al crear una Orden de Compra, avisar si el departamento ya agotó su presupuesto asignado. *Nota: ya existe el catálogo de `departments`; faltaría el presupuesto anual y la validación al crear `purchase_orders`.*
+
+**Recursos Humanos e Infraestructura**
+- Core:
+  - Control de Vacaciones e Incapacidades (Ausencias): empleado solicita → gerente aprueba → RRHH descuenta del saldo anual.
+  - Asignación de Suplencias: si un docente se reporta enfermo, Coordinación reasigna sus clases del día a un suplente, afectando el pago por horas de ambos. *Nota: se conectaría directo con el cálculo de horas por distributivo ya construido (`computeScheduledHours`, ver sección 3) — habría que restar las horas del titular y sumárselas al suplente ese día específico.*
+- Avanzado (diferenciadores):
+  - Reserva de Espacios (Facility Booking): calendario para reservar auditorio/laboratorio/proyector/sala de cómputo y evitar conflictos.
+  - Evaluación Docente 360°: alumnos + coordinación evalúan al profesor anualmente, genera puntaje de desempeño para RRHH.
+
+**Arquitectura y Escalabilidad (Técnico)**
+- App Móvil Nativa o PWA instalable (iOS/Android) para Portal de Padres y Docentes, con notificaciones push (Firebase o Supabase).
+- API Pública del colegio: endpoints controlados para integrar con sistemas heredados (ej. torniquetes de acceso físico).
+- Auditoría Estricta ampliada: quién/cuándo/desde qué IP cambió una calificación, borró un pago o modificó una asistencia. *Nota: ya existe `audit_logs` usado en varios módulos (tenants, tareas, etc.); esto pediría ampliarlo a **todas** las mutaciones sensibles con IP, no solo las que ya lo registran.*
+
+*(Pendiente de que el usuario siga pegando el resto de las secciones, si hay más — se irán agregando aquí en el mismo formato antes de decidir qué se construye.)*
 
 ### 5.2 Backlog técnico interno
 
