@@ -130,7 +130,7 @@ router.get("/classes", async (req: Request, res: Response) => {
 
     let query = supabaseAdmin
       .from("classes")
-      .select("*, courses(name, code), profiles(first_name, last_name), academic_terms(name)")
+      .select("*, courses(name, code), profiles(first_name, last_name), academic_terms(name), grade_sections(name, grade_levels(name))")
       .eq("tenant_id", tenant_id);
 
     if (term_id) query = query.eq("term_id", term_id);
@@ -207,14 +207,17 @@ router.patch("/class-enrollments/:id", async (req: Request, res: Response) => {
 // POST /api/v1/academics/classes
 router.post("/classes", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, term_id, course_id, teacher_id, name, capacity } = req.body;
+    const { tenant_id, term_id, course_id, teacher_id, grade_section_id, name, capacity } = req.body;
     if (!tenant_id || !term_id || !course_id || !name) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, term_id, course_id, name)" });
     }
 
     const { data: classGroup, error } = await supabaseAdmin
       .from("classes")
-      .insert({ tenant_id, term_id, course_id, teacher_id: teacher_id || null, name, capacity: capacity || 30 })
+      .insert({
+        tenant_id, term_id, course_id, teacher_id: teacher_id || null,
+        grade_section_id: grade_section_id || null, name, capacity: capacity || 30,
+      })
       .select()
       .single();
 
@@ -233,6 +236,37 @@ router.post("/classes", async (req: Request, res: Response) => {
     return res.status(201).json({ success: true, message: "Grupo/clase creado y asignado.", class: classGroup });
   } catch (error: any) {
     console.error("Error en POST /api/v1/academics/classes:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// PATCH /api/v1/academics/classes/:id
+// Reasigna el docente, el grado-sección, el nombre o la capacidad de un
+// grupo ya creado (un docente puede tener varios classes: distintos
+// cursos, grados y secciones a la vez).
+router.patch("/classes/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { teacher_id, grade_section_id, name, capacity } = req.body;
+
+    const updates: Record<string, any> = {};
+    if (teacher_id !== undefined) updates.teacher_id = teacher_id || null;
+    if (grade_section_id !== undefined) updates.grade_section_id = grade_section_id || null;
+    if (name !== undefined) updates.name = name;
+    if (capacity !== undefined) updates.capacity = capacity;
+
+    const { data: classGroup, error } = await supabaseAdmin
+      .from("classes")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error || !classGroup) return res.status(404).json({ error: "Grupo/clase no encontrado." });
+
+    return res.status(200).json({ success: true, message: "Grupo/clase actualizado.", class: classGroup });
+  } catch (error: any) {
+    console.error("Error en PATCH /api/v1/academics/classes/:id:", error);
     return res.status(500).json({ error: "Error interno" });
   }
 });

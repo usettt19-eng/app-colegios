@@ -70,9 +70,12 @@ interface ClassGroup {
   id: string;
   name: string;
   capacity: number;
+  teacher_id: string | null;
+  grade_section_id: string | null;
   courses?: { name: string; code: string };
   profiles?: { first_name: string; last_name: string } | null;
   academic_terms?: { name: string };
+  grade_sections?: { name: string; grade_levels?: { name: string } } | null;
 }
 
 interface GradeLevel {
@@ -106,7 +109,9 @@ export const AdminAdvancedPortal: React.FC = () => {
 
   const [termForm, setTermForm] = useState({ name: '', start_date: '', end_date: '', is_active: false });
   const [courseForm, setCourseForm] = useState({ code: '', name: '', credits: '' });
-  const [classForm, setClassForm] = useState({ term_id: '', course_id: '', name: '', capacity: '30' });
+  const [classForm, setClassForm] = useState({ term_id: '', course_id: '', name: '', capacity: '30', teacher_id: '', grade_section_id: '' });
+  const [classGradeLevelId, setClassGradeLevelId] = useState('');
+  const [classTeacherReassign, setClassTeacherReassign] = useState<Record<string, string>>({});
   const [scheduleForm, setScheduleForm] = useState({ class_id: '', day_of_week: '1', start_time: '08:00', end_time: '09:00', room_number: '' });
 
   // --- Alumnos y Padres (subvista) ---
@@ -277,6 +282,9 @@ export const AdminAdvancedPortal: React.FC = () => {
 
   useEffect(() => {
     loadAll();
+    loadOrganization();
+    loadGradeLevels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadFeeSchedules = async () => {
@@ -604,12 +612,15 @@ export const AdminAdvancedPortal: React.FC = () => {
           course_id: classForm.course_id,
           name: classForm.name,
           capacity: Number(classForm.capacity) || 30,
+          teacher_id: classForm.teacher_id || null,
+          grade_section_id: classForm.grade_section_id || null,
         }),
       });
       const data = await response.json();
       if (data.success) {
         setMessage('✅ Grupo creado y asignado al distributivo.');
-        setClassForm({ term_id: '', course_id: '', name: '', capacity: '30' });
+        setClassForm({ term_id: '', course_id: '', name: '', capacity: '30', teacher_id: '', grade_section_id: '' });
+        setClassGradeLevelId('');
         loadAll();
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo crear el grupo.'));
@@ -618,6 +629,27 @@ export const AdminAdvancedPortal: React.FC = () => {
       setMessage('❌ Error de conexión.');
     }
     setLoading(false);
+  };
+
+  const handleReassignTeacher = async (classId: string) => {
+    const teacherId = classTeacherReassign[classId];
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/academics/classes/${classId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teacher_id: teacherId || null }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Docente reasignado.');
+        loadAll();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo reasignar el docente.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
   };
 
   const handleCreateSchedule = async () => {
@@ -869,6 +901,36 @@ export const AdminAdvancedPortal: React.FC = () => {
                 onChange={e => setClassForm({ ...classForm, capacity: e.target.value })}
                 className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
               />
+              <div className="grid grid-cols-2 gap-3">
+                <select
+                  value={classGradeLevelId}
+                  onChange={e => { setClassGradeLevelId(e.target.value); setClassForm({ ...classForm, grade_section_id: '' }); }}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                >
+                  <option value="">Grado (opcional)</option>
+                  {gradeLevels.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+                <select
+                  value={classForm.grade_section_id}
+                  onChange={e => setClassForm({ ...classForm, grade_section_id: e.target.value })}
+                  disabled={!classGradeLevelId}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 disabled:opacity-50"
+                >
+                  <option value="">Sección</option>
+                  {(gradeLevels.find(g => g.id === classGradeLevelId)?.grade_sections || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <select
+                value={classForm.teacher_id}
+                onChange={e => setClassForm({ ...classForm, teacher_id: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              >
+                <option value="">Docente (opcional, se puede asignar después)</option>
+                {staff.filter(s => s.role === 'teacher').map(t => <option key={t.id} value={t.id}>{t.first_name} {t.last_name}</option>)}
+              </select>
+              <p className="text-xs text-slate-400">
+                Un mismo docente puede tener varios grupos: distintos cursos, grados y secciones — solo créalos por separado y asígnale el mismo docente en cada uno.
+              </p>
               <button
                 onClick={handleCreateClass}
                 disabled={loading}
@@ -892,6 +954,7 @@ export const AdminAdvancedPortal: React.FC = () => {
                   <tr>
                     <th className="px-4 py-3 font-semibold">GRUPO</th>
                     <th className="px-4 py-3 font-semibold">CURSO</th>
+                    <th className="px-4 py-3 font-semibold">GRADO-SECCIÓN</th>
                     <th className="px-4 py-3 font-semibold">CICLO</th>
                     <th className="px-4 py-3 font-semibold">DOCENTE</th>
                   </tr>
@@ -901,9 +964,20 @@ export const AdminAdvancedPortal: React.FC = () => {
                     <tr key={c.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-semibold">{c.name}</td>
                       <td className="px-4 py-3 text-slate-500">{c.courses?.code} — {c.courses?.name}</td>
-                      <td className="px-4 py-3 text-slate-500">{c.academic_terms?.name}</td>
                       <td className="px-4 py-3 text-slate-500">
-                        {c.profiles ? `${c.profiles.first_name} ${c.profiles.last_name}` : 'Sin asignar'}
+                        {c.grade_sections ? `${c.grade_sections.grade_levels?.name || ''} - ${c.grade_sections.name}` : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">{c.academic_terms?.name}</td>
+                      <td className="px-4 py-3">
+                        <select
+                          value={classTeacherReassign[c.id] ?? c.teacher_id ?? ''}
+                          onChange={e => setClassTeacherReassign({ ...classTeacherReassign, [c.id]: e.target.value })}
+                          onBlur={() => (classTeacherReassign[c.id] ?? c.teacher_id ?? '') !== (c.teacher_id ?? '') && handleReassignTeacher(c.id)}
+                          className="border border-slate-300 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-rose-500"
+                        >
+                          <option value="">Sin asignar</option>
+                          {staff.filter(s => s.role === 'teacher').map(t => <option key={t.id} value={t.id}>{t.first_name} {t.last_name}</option>)}
+                        </select>
                       </td>
                     </tr>
                   ))}

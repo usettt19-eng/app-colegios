@@ -70,6 +70,7 @@ CREATE TABLE public.classes (
     teacher_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL, -- FK a perfiles con role='teacher'
     
     name TEXT NOT NULL, -- Ej: "Grupo A", "Tucans"
+    grade_section_id UUID REFERENCES public.grade_sections(id) ON DELETE SET NULL, -- A qué grado-sección se dicta este curso (un docente puede tener varios classes: distintos cursos, grados y secciones)
     lms_sync_id TEXT, -- Para sincronizar con Canvas/Google Classroom
     capacity INT DEFAULT 30,
     
