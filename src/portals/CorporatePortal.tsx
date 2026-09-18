@@ -31,10 +31,13 @@ interface Employee {
   id: string;
   profile_id: string;
   hire_date: string;
-  base_salary: number;
+  base_salary: number | null;
   status: string;
   employment_type: 'local' | 'expatriate' | 'honorarios';
   custom_employee_rate: number | null;
+  pay_type: 'monthly' | 'hourly';
+  hourly_rate: number | null;
+  hourly_prep_percent: number | null;
   profiles?: { first_name: string; last_name: string; role: string };
 }
 
@@ -71,6 +74,7 @@ interface Paystub {
   gross_pay: number;
   deductions: number;
   net_pay: number;
+  hours_worked: number | null;
   status: string;
   hr_employees?: { profiles?: { first_name: string; last_name: string } };
 }
@@ -139,7 +143,10 @@ export const CorporatePortal: React.FC = () => {
   const [paystubs, setPaystubs] = useState<Paystub[]>([]);
   const [payrollLoading, setPayrollLoading] = useState(false);
 
-  const [employeeForm, setEmployeeForm] = useState({ profile_id: '', hire_date: '', base_salary: '', employment_type: 'local', custom_employee_rate: '' });
+  const [employeeForm, setEmployeeForm] = useState({
+    profile_id: '', hire_date: '', employment_type: 'local', custom_employee_rate: '',
+    pay_type: 'monthly', base_salary: '', hourly_rate: '', hourly_prep_percent: '',
+  });
   const [runForm, setRunForm] = useState({ period_start: '', period_end: '', run_type: 'regular' });
   const [deductionRateOverride, setDeductionRateOverride] = useState<Record<string, string>>({});
   const [countryRule, setCountryRule] = useState<CountryRule | null>(null);
@@ -431,8 +438,16 @@ export const CorporatePortal: React.FC = () => {
   };
 
   const handleAddEmployee = async () => {
-    if (!employeeForm.profile_id || !employeeForm.hire_date || !employeeForm.base_salary) {
-      setMessage('❌ Completa perfil, fecha de contratación y salario base.');
+    if (!employeeForm.profile_id || !employeeForm.hire_date) {
+      setMessage('❌ Completa perfil y fecha de contratación.');
+      return;
+    }
+    if (employeeForm.pay_type === 'monthly' && !employeeForm.base_salary) {
+      setMessage('❌ Falta el salario base mensual.');
+      return;
+    }
+    if (employeeForm.pay_type === 'hourly' && !employeeForm.hourly_rate) {
+      setMessage('❌ Falta la tarifa por hora.');
       return;
     }
     setPayrollLoading(true);
@@ -445,15 +460,21 @@ export const CorporatePortal: React.FC = () => {
           tenant_id: DEMO_TENANT_ID,
           profile_id: employeeForm.profile_id,
           hire_date: employeeForm.hire_date,
-          base_salary: Number(employeeForm.base_salary),
           employment_type: employeeForm.employment_type,
           custom_employee_rate: employeeForm.custom_employee_rate ? Number(employeeForm.custom_employee_rate) : undefined,
+          pay_type: employeeForm.pay_type,
+          base_salary: employeeForm.pay_type === 'monthly' ? Number(employeeForm.base_salary) : undefined,
+          hourly_rate: employeeForm.pay_type === 'hourly' ? Number(employeeForm.hourly_rate) : undefined,
+          hourly_prep_percent: employeeForm.pay_type === 'hourly' && employeeForm.hourly_prep_percent ? Number(employeeForm.hourly_prep_percent) : undefined,
         }),
       });
       const data = await response.json();
       if (data.success) {
         setMessage('✅ Empleado registrado en nómina.');
-        setEmployeeForm({ profile_id: '', hire_date: '', base_salary: '', employment_type: 'local', custom_employee_rate: '' });
+        setEmployeeForm({
+          profile_id: '', hire_date: '', employment_type: 'local', custom_employee_rate: '',
+          pay_type: 'monthly', base_salary: '', hourly_rate: '', hourly_prep_percent: '',
+        });
         loadPayrollData();
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo registrar al empleado.'));
@@ -879,14 +900,51 @@ export const CorporatePortal: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400">Salario base</label>
+                  <label className="text-xs text-slate-400">Forma de pago</label>
+                  <select
+                    value={employeeForm.pay_type}
+                    onChange={e => setEmployeeForm({ ...employeeForm, pay_type: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="monthly">Salario mensual fijo</option>
+                    <option value="hourly">Por horas (sin dedicación exclusiva)</option>
+                  </select>
+                </div>
+              </div>
+              {employeeForm.pay_type === 'monthly' ? (
+                <div>
+                  <label className="text-xs text-slate-400">Salario base mensual</label>
                   <input
                     type="number" placeholder="0.00" value={employeeForm.base_salary}
                     onChange={e => setEmployeeForm({ ...employeeForm, base_salary: e.target.value })}
                     className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-400">Tarifa por hora</label>
+                      <input
+                        type="number" placeholder="0.00" value={employeeForm.hourly_rate}
+                        onChange={e => setEmployeeForm({ ...employeeForm, hourly_rate: e.target.value })}
+                        className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400">% extra prep./corrección</label>
+                      <input
+                        type="number" placeholder="Ej. 30" value={employeeForm.hourly_prep_percent}
+                        onChange={e => setEmployeeForm({ ...employeeForm, hourly_prep_percent: e.target.value })}
+                        className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-md p-2">
+                    Las horas se calculan automáticamente del distributivo real del docente (Admin → Horarios). El trabajo de un docente no es solo la clase: si quieres compensar preparación y corrección de evaluaciones, súmalo aquí como % adicional sobre las horas de clase (ej. 30% = se pagan 1.3x las horas dictadas). Déjalo en 0 si solo quieres pagar horas de clase.
+                  </p>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-slate-400">Tipo de contratación</label>
@@ -996,7 +1054,7 @@ export const CorporatePortal: React.FC = () => {
                     <th className="px-4 py-3 font-semibold">ROL</th>
                     <th className="px-4 py-3 font-semibold">TIPO</th>
                     <th className="px-4 py-3 font-semibold">CONTRATADO</th>
-                    <th className="px-4 py-3 font-semibold text-right">SALARIO BASE</th>
+                    <th className="px-4 py-3 font-semibold text-right">TARIFA</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -1016,7 +1074,11 @@ export const CorporatePortal: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-slate-500">{emp.hire_date}</td>
-                      <td className="px-4 py-3 text-right font-mono">${Number(emp.base_salary).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right font-mono">
+                        {emp.pay_type === 'hourly'
+                          ? <>${Number(emp.hourly_rate || 0).toFixed(2)}/hora{!!emp.hourly_prep_percent && <span className="block text-xs text-slate-400">+{emp.hourly_prep_percent}% prep.</span>}</>
+                          : <>${Number(emp.base_salary || 0).toFixed(2)}/mes</>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1111,7 +1173,10 @@ export const CorporatePortal: React.FC = () => {
                         <td className="px-4 py-3 font-semibold">
                           {p.hr_employees?.profiles ? `${p.hr_employees.profiles.first_name} ${p.hr_employees.profiles.last_name}` : 'Empleado'}
                         </td>
-                        <td className="px-4 py-3 text-right font-mono">${Number(p.gross_pay).toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right font-mono">
+                          ${Number(p.gross_pay).toFixed(2)}
+                          {p.hours_worked !== null && <span className="block text-xs text-slate-400">{p.hours_worked}h</span>}
+                        </td>
                         <td className="px-4 py-3 text-right font-mono text-rose-600">-${Number(p.deductions).toFixed(2)}</td>
                         <td className="px-4 py-3 text-right font-mono font-bold">${Number(p.net_pay).toFixed(2)}</td>
                         <td className="px-4 py-3 text-right">

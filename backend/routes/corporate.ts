@@ -631,21 +631,37 @@ router.get("/employees", async (req: Request, res: Response) => {
 });
 
 // POST /api/v1/corporate/employees
-// Da de alta a un profesor/administrativo en nómina con su salario base
+// Da de alta a un profesor/administrativo en nómina, ya sea con salario
+// mensual fijo o por hora (para docentes que no tienen dedicación
+// exclusiva ni dan clase todos los días).
 router.post("/employees", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, profile_id, hire_date, base_salary, bank_account_info, tax_id, employment_type, custom_employee_rate } = req.body;
+    const {
+      tenant_id, profile_id, hire_date, bank_account_info, tax_id, employment_type, custom_employee_rate,
+      pay_type, base_salary, hourly_rate, hourly_prep_percent,
+    } = req.body;
 
-    if (!tenant_id || !profile_id || !hire_date || base_salary === undefined) {
-      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, profile_id, hire_date, base_salary)" });
+    if (!tenant_id || !profile_id || !hire_date) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, profile_id, hire_date)" });
+    }
+    const resolvedPayType = pay_type === "hourly" ? "hourly" : "monthly";
+    if (resolvedPayType === "monthly" && (base_salary === undefined || base_salary === "")) {
+      return res.status(400).json({ error: "Falta el salario base mensual." });
+    }
+    if (resolvedPayType === "hourly" && (hourly_rate === undefined || hourly_rate === "")) {
+      return res.status(400).json({ error: "Falta la tarifa por hora." });
     }
 
     const { data: employee, error } = await supabaseAdmin
       .from("hr_employees")
       .insert({
-        tenant_id, profile_id, hire_date, base_salary, bank_account_info, tax_id,
+        tenant_id, profile_id, hire_date, bank_account_info, tax_id,
         employment_type: employment_type || "local",
         custom_employee_rate: custom_employee_rate !== undefined && custom_employee_rate !== "" ? custom_employee_rate : null,
+        pay_type: resolvedPayType,
+        base_salary: resolvedPayType === "monthly" ? base_salary : null,
+        hourly_rate: resolvedPayType === "hourly" ? hourly_rate : null,
+        hourly_prep_percent: resolvedPayType === "hourly" && hourly_prep_percent !== undefined && hourly_prep_percent !== "" ? hourly_prep_percent : 0,
       })
       .select()
       .single();
@@ -656,10 +672,11 @@ router.post("/employees", async (req: Request, res: Response) => {
     }
 
     const typeLabel = employment_type === "honorarios" ? "por honorarios profesionales (sin deducciones)" : employment_type === "expatriate" ? "expatriado" : "local";
+    const payLabel = resolvedPayType === "hourly" ? `$${hourly_rate}/hora` : `$${base_salary}/mes`;
     await supabaseAdmin.from("audit_logs").insert({
       tenant_id,
       event_type: "HR",
-      description: `Se dio de alta en nómina al empleado (perfil ID: ${profile_id}) con salario base $${base_salary}, tipo: ${typeLabel}.`,
+      description: `Se dio de alta en nómina al empleado (perfil ID: ${profile_id}), ${payLabel}, tipo: ${typeLabel}.`,
       actor_name: "HR System",
     });
 
@@ -669,6 +686,49 @@ router.post("/employees", async (req: Request, res: Response) => {
     return res.status(500).json({ error: "Error interno" });
   }
 });
+
+// Calcula las horas reales que un docente tiene en su distributivo
+// (class_schedules de sus classes) dentro de un rango de fechas, contando
+// cada bloque una vez por cada día del periodo que coincida con su
+// day_of_week (0=domingo...6=sábado, igual que Date#getDay()).
+async function computeScheduledHours(tenantId: string, teacherProfileId: string, periodStart: string, periodEnd: string): Promise<number> {
+  const { data: classes } = await supabaseAdmin
+    .from("classes")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("teacher_id", teacherProfileId);
+
+  const classIds = (classes || []).map(c => c.id);
+  if (classIds.length === 0) return 0;
+
+  const { data: blocks } = await supabaseAdmin
+    .from("class_schedules")
+    .select("day_of_week, start_time, end_time")
+    .in("class_id", classIds);
+
+  if (!blocks || blocks.length === 0) return 0;
+
+  const blockHours = (start: string, end: string): number => {
+    const [sh, sm] = start.split(":").map(Number);
+    const [eh, em] = end.split(":").map(Number);
+    return (eh * 60 + em - (sh * 60 + sm)) / 60;
+  };
+
+  let totalHours = 0;
+  const cursor = new Date(`${periodStart}T00:00:00`);
+  const end = new Date(`${periodEnd}T00:00:00`);
+  while (cursor <= end) {
+    const dayOfWeek = cursor.getDay();
+    for (const block of blocks) {
+      if (block.day_of_week === dayOfWeek) {
+        totalHours += blockHours(block.start_time, block.end_time);
+      }
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return Number(totalHours.toFixed(2));
+}
 
 // GET /api/v1/corporate/payroll/runs?tenant_id=...
 // Lista las planillas (corridas de nómina) de un colegio
@@ -855,7 +915,7 @@ router.post("/payroll/runs/:id/calculate", async (req: Request, res: Response) =
 
     const { data: employees, error: employeesError } = await supabaseAdmin
       .from("hr_employees")
-      .select("id, base_salary, employment_type, custom_employee_rate")
+      .select("id, profile_id, base_salary, pay_type, hourly_rate, hourly_prep_percent, employment_type, custom_employee_rate")
       .eq("tenant_id", run.tenant_id)
       .eq("status", "active");
 
@@ -902,8 +962,21 @@ router.post("/payroll/runs/:id/calculate", async (req: Request, res: Response) =
       return defaultRate;
     };
 
-    const paystubs = employees.map(emp => {
-      const grossPay = Number(emp.base_salary);
+    // Los empleados por hora (docentes sin dedicación exclusiva) cobran
+    // sobre las horas reales de su distributivo (class_schedules) MÁS el %
+    // de preparación/corrección configurado por empleado (el trabajo de un
+    // docente no es solo la hora frente al grupo) — no un salario fijo.
+    const resolvedGross = await Promise.all(employees.map(async emp => {
+      if (emp.pay_type === "hourly") {
+        const contactHours = await computeScheduledHours(run.tenant_id, emp.profile_id, run.period_start, run.period_end);
+        const prepMultiplier = 1 + Number(emp.hourly_prep_percent || 0) / 100;
+        const paidHours = Number((contactHours * prepMultiplier).toFixed(2));
+        return { emp, grossPay: Number((paidHours * Number(emp.hourly_rate || 0)).toFixed(2)), hoursWorked: paidHours };
+      }
+      return { emp, grossPay: Number(emp.base_salary || 0), hoursWorked: null as number | null };
+    }));
+
+    const paystubs = resolvedGross.map(({ emp, grossPay, hoursWorked }) => {
       const rate = rateForEmployee(emp);
       const deductions = Number((grossPay * rate).toFixed(2));
       const netPay = Number((grossPay - deductions).toFixed(2));
@@ -913,6 +986,7 @@ router.post("/payroll/runs/:id/calculate", async (req: Request, res: Response) =
         gross_pay: grossPay,
         deductions,
         net_pay: netPay,
+        hours_worked: hoursWorked,
         status: "pending",
       };
     });
@@ -926,9 +1000,9 @@ router.post("/payroll/runs/:id/calculate", async (req: Request, res: Response) =
     const totalAmount = paystubs.reduce((sum, p) => sum + p.net_pay, 0);
     // El costo patronal solo aplica a empleados en relación de planilla
     // (local/expatriado); honorarios profesionales no genera cuota patronal.
-    const totalGrossForEmployerCost = employees
-      .filter(emp => emp.employment_type !== "honorarios")
-      .reduce((sum, emp) => sum + Number(emp.base_salary), 0);
+    const totalGrossForEmployerCost = resolvedGross
+      .filter(({ emp }) => emp.employment_type !== "honorarios")
+      .reduce((sum, { grossPay }) => sum + grossPay, 0);
     const employerCost = Number((totalGrossForEmployerCost * (employerRatePercent / 100)).toFixed(2));
 
     const { data: updatedRun, error: updateError } = await supabaseAdmin
