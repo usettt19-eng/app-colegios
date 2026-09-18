@@ -49,6 +49,19 @@ interface PayrollRun {
   period_end: string;
   total_amount: number;
   status: string;
+  run_type: string;
+}
+
+interface CountryRule {
+  country_code: string;
+  country_name: string;
+  social_security_label: string;
+  employee_rate: number;
+  employer_rate: number;
+  extra_month_label: string | null;
+  extra_month_has_own_rate: boolean;
+  extra_month_employee_rate: number | null;
+  extra_month_employer_rate: number | null;
 }
 
 interface Paystub {
@@ -108,22 +121,29 @@ export const CorporatePortal: React.FC = () => {
   const [payrollLoading, setPayrollLoading] = useState(false);
 
   const [employeeForm, setEmployeeForm] = useState({ profile_id: '', hire_date: '', base_salary: '' });
-  const [runForm, setRunForm] = useState({ period_start: '', period_end: '' });
-  const [deductionRate, setDeductionRate] = useState('12');
+  const [runForm, setRunForm] = useState({ period_start: '', period_end: '', run_type: 'regular' });
+  const [deductionRateOverride, setDeductionRateOverride] = useState<Record<string, string>>({});
+  const [countryRule, setCountryRule] = useState<CountryRule | null>(null);
 
   const loadPayrollData = async () => {
     try {
-      const [employeesRes, runsRes, staffRes] = await Promise.all([
+      const [employeesRes, runsRes, staffRes, tenantRes, rulesRes] = await Promise.all([
         fetch(`/api/v1/corporate/employees?tenant_id=${DEMO_TENANT_ID}`),
         fetch(`/api/v1/corporate/payroll/runs?tenant_id=${DEMO_TENANT_ID}`),
         fetch(`/api/v1/hierarchy/staff?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/tenants/${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/corporate/payroll-country-rules`),
       ]);
       const employeesData = await employeesRes.json();
       const runsData = await runsRes.json();
       const staffData = await staffRes.json();
+      const tenantData = await tenantRes.json();
+      const rulesData = await rulesRes.json();
       setEmployees(employeesData.employees || []);
       setPayrollRuns(runsData.runs || []);
       setStaffOptions(staffData.staff || []);
+      const rules: CountryRule[] = rulesData.countryRules || [];
+      setCountryRule(rules.find(r => r.country_code === tenantData.tenant?.country) || null);
     } catch {
       setMessage('❌ No se pudo conectar con el servidor SIS.');
     }
@@ -434,7 +454,7 @@ export const CorporatePortal: React.FC = () => {
       const data = await response.json();
       if (data.success) {
         setMessage('✅ Planilla abierta en borrador.');
-        setRunForm({ period_start: '', period_end: '' });
+        setRunForm({ period_start: '', period_end: '', run_type: 'regular' });
         loadPayrollData();
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo abrir la planilla.'));
@@ -449,10 +469,11 @@ export const CorporatePortal: React.FC = () => {
     setPayrollLoading(true);
     setMessage('');
     try {
+      const override = deductionRateOverride[runId];
       const response = await fetch(`/api/v1/corporate/payroll/runs/${runId}/calculate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deduction_rate: Number(deductionRate) / 100 }),
+        body: JSON.stringify(override ? { deduction_rate: Number(override) / 100 } : {}),
       });
       const data = await response.json();
       if (data.success) {
@@ -797,13 +818,28 @@ export const CorporatePortal: React.FC = () => {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-slate-400">% Deducciones (seguro social / impuestos) al calcular</label>
-                <input
-                  type="number" value={deductionRate}
-                  onChange={e => setDeductionRate(e.target.value)}
+                <label className="text-xs text-slate-400">Tipo de planilla</label>
+                <select
+                  value={runForm.run_type}
+                  onChange={e => setRunForm({ ...runForm, run_type: e.target.value })}
                   className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+                >
+                  <option value="regular">Regular</option>
+                  <option value="extra_month">{countryRule?.extra_month_label || 'Mes Extra (aguinaldo/décimo/prima)'}</option>
+                </select>
               </div>
+              {countryRule ? (
+                <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-md p-2">
+                  Se calculará con las reglas de <strong>{countryRule.country_name} ({countryRule.social_security_label})</strong>:{' '}
+                  {runForm.run_type === 'extra_month' && countryRule.extra_month_has_own_rate
+                    ? `${countryRule.extra_month_employee_rate}% al empleado sobre el ${countryRule.extra_month_label}.`
+                    : `${countryRule.employee_rate}% al empleado.`}
+                </p>
+              ) : (
+                <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-md p-2">
+                  Este colegio no tiene país configurado — se usará un 12% de deducción por defecto (editable al calcular cada planilla).
+                </p>
+              )}
               <button
                 onClick={handleOpenRun}
                 disabled={payrollLoading}
@@ -860,6 +896,7 @@ export const CorporatePortal: React.FC = () => {
                 <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
                   <tr>
                     <th className="px-4 py-3 font-semibold">PERIODO</th>
+                    <th className="px-4 py-3 font-semibold">TIPO</th>
                     <th className="px-4 py-3 font-semibold">ESTADO</th>
                     <th className="px-4 py-3 font-semibold text-right">TOTAL NETO</th>
                     <th className="px-4 py-3 font-semibold text-right">ACCIÓN</th>
@@ -869,6 +906,7 @@ export const CorporatePortal: React.FC = () => {
                   {payrollRuns.map(run => (
                     <tr key={run.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3">{run.period_start} → {run.period_end}</td>
+                      <td className="px-4 py-3 text-slate-500">{run.run_type === 'extra_month' ? (countryRule?.extra_month_label || 'Mes Extra') : 'Regular'}</td>
                       <td className="px-4 py-3">
                         <span className={`px-2 py-1 rounded-full text-xs font-bold ${
                           run.status === 'paid' ? 'bg-emerald-100 text-emerald-700' :
@@ -878,13 +916,21 @@ export const CorporatePortal: React.FC = () => {
                       <td className="px-4 py-3 text-right font-mono">${Number(run.total_amount).toFixed(2)}</td>
                       <td className="px-4 py-3 text-right space-x-2">
                         {run.status === 'draft' ? (
-                          <button
-                            onClick={() => handleCalculateRun(run.id)}
-                            disabled={payrollLoading}
-                            className="text-blue-600 font-bold hover:text-blue-800 bg-blue-50 px-3 py-1 rounded disabled:opacity-50"
-                          >
-                            Calcular Planilla
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <input
+                              type="number" placeholder="% manual (opcional)"
+                              value={deductionRateOverride[run.id] || ''}
+                              onChange={e => setDeductionRateOverride({ ...deductionRateOverride, [run.id]: e.target.value })}
+                              className="w-32 border border-slate-300 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <button
+                              onClick={() => handleCalculateRun(run.id)}
+                              disabled={payrollLoading}
+                              className="text-blue-600 font-bold hover:text-blue-800 bg-blue-50 px-3 py-1 rounded disabled:opacity-50"
+                            >
+                              Calcular Planilla
+                            </button>
+                          </div>
                         ) : (
                           <button
                             onClick={() => handleViewPaystubs(run.id)}

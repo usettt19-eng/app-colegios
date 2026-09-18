@@ -591,6 +591,24 @@ router.post("/consumables/dispatch", async (req: Request, res: Response) => {
 // MÓDULO DE RECURSOS HUMANOS Y NÓMINA (PAYROLL)
 // ==========================================
 
+// GET /api/v1/corporate/payroll-country-rules
+// Catálogo de reglas de seguro social por país (referencia global, no es
+// por tenant). Ver database_schemas/payroll_by_country_research.md.
+router.get("/payroll-country-rules", async (_req: Request, res: Response) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("payroll_country_rules")
+      .select("*")
+      .order("country_name");
+
+    if (error) return res.status(500).json({ error: "Error al consultar las reglas de nómina por país." });
+    return res.status(200).json({ success: true, countryRules: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/corporate/payroll-country-rules:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // GET /api/v1/corporate/employees?tenant_id=...
 // Lista el staff (profesores/administrativos) dado de alta en nómina
 router.get("/employees", async (req: Request, res: Response) => {
@@ -692,14 +710,14 @@ router.get("/payroll/runs/:id/paystubs", async (req: Request, res: Response) => 
 // Abre una nueva planilla en borrador para un periodo (ej. quincena, mes)
 router.post("/payroll/runs", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, period_start, period_end } = req.body;
+    const { tenant_id, period_start, period_end, run_type } = req.body;
     if (!tenant_id || !period_start || !period_end) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, period_start, period_end)" });
     }
 
     const { data: run, error } = await supabaseAdmin
       .from("payroll_runs")
-      .insert({ tenant_id, period_start, period_end, total_amount: 0, status: "draft" })
+      .insert({ tenant_id, period_start, period_end, total_amount: 0, status: "draft", run_type: run_type || "regular" })
       .select()
       .single();
 
@@ -717,12 +735,15 @@ router.post("/payroll/runs", async (req: Request, res: Response) => {
 
 // POST /api/v1/corporate/payroll/runs/:id/calculate
 // Calcula la planilla: genera un recibo de pago por cada empleado activo
-// a partir de su salario base, aplicando un porcentaje único de deducciones
-// (seguro social / impuestos) sobre el bruto.
+// a partir de su salario base, aplicando el % de seguro social del país
+// del colegio (tenants.country -> payroll_country_rules). Si la planilla
+// es de "mes extra" (aguinaldo/décimo/prima) y el país tiene una cuota
+// distinta para eso (ej. Panamá), usa esa en vez de la regular.
+// deduction_rate sigue existiendo como override manual si se necesita.
 router.post("/payroll/runs/:id/calculate", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { deduction_rate } = req.body; // ej. 0.12 = 12% de deducciones
+    const { deduction_rate } = req.body; // ej. 0.12 = 12% de deducciones, opcional
 
     const { data: run } = await supabaseAdmin.from("payroll_runs").select("*").eq("id", id).single();
     if (!run) return res.status(404).json({ error: "Planilla no encontrada." });
@@ -741,7 +762,29 @@ router.post("/payroll/runs/:id/calculate", async (req: Request, res: Response) =
       return res.status(400).json({ error: "No hay empleados activos para calcular la planilla." });
     }
 
-    const rate = typeof deduction_rate === "number" ? deduction_rate : 0.12;
+    let employeeRatePercent = 12; // valor por defecto si el colegio no tiene país configurado
+    let employerRatePercent = 0;
+    let ruleSource = "manual (sin país configurado)";
+
+    if (typeof deduction_rate !== "number") {
+      const { data: tenant } = await supabaseAdmin.from("tenants").select("country").eq("id", run.tenant_id).single();
+      if (tenant?.country) {
+        const { data: rule } = await supabaseAdmin
+          .from("payroll_country_rules")
+          .select("*")
+          .eq("country_code", tenant.country)
+          .single();
+
+        if (rule) {
+          const useExtraMonthRate = run.run_type === "extra_month" && rule.extra_month_has_own_rate;
+          employeeRatePercent = Number(useExtraMonthRate ? rule.extra_month_employee_rate : rule.employee_rate);
+          employerRatePercent = Number(useExtraMonthRate ? rule.extra_month_employer_rate : rule.employer_rate);
+          ruleSource = `${rule.country_name} (${rule.social_security_label}${useExtraMonthRate ? ` — ${rule.extra_month_label}` : ""})`;
+        }
+      }
+    }
+
+    const rate = typeof deduction_rate === "number" ? deduction_rate : employeeRatePercent / 100;
 
     const paystubs = employees.map(emp => {
       const grossPay = Number(emp.base_salary);
@@ -764,6 +807,8 @@ router.post("/payroll/runs/:id/calculate", async (req: Request, res: Response) =
     }
 
     const totalAmount = paystubs.reduce((sum, p) => sum + p.net_pay, 0);
+    const totalGross = paystubs.reduce((sum, p) => sum + p.gross_pay, 0);
+    const employerCost = Number((totalGross * (employerRatePercent / 100)).toFixed(2));
 
     const { data: updatedRun, error: updateError } = await supabaseAdmin
       .from("payroll_runs")
@@ -780,14 +825,15 @@ router.post("/payroll/runs/:id/calculate", async (req: Request, res: Response) =
     await supabaseAdmin.from("audit_logs").insert({
       tenant_id: run.tenant_id,
       event_type: "HR",
-      description: `Planilla ${run.period_start} a ${run.period_end} calculada: ${paystubs.length} recibos por un total de $${totalAmount.toFixed(2)}.`,
+      description: `Planilla ${run.period_start} a ${run.period_end} calculada con reglas de ${ruleSource} (${(rate * 100).toFixed(2)}% deducción empleado): ${paystubs.length} recibos por un total de $${totalAmount.toFixed(2)}. Costo patronal adicional estimado: $${employerCost.toFixed(2)}.`,
       actor_name: "HR System",
     });
 
     return res.status(200).json({
       success: true,
-      message: `Planilla calculada: ${paystubs.length} recibos generados por un total de $${totalAmount.toFixed(2)}.`,
+      message: `Planilla calculada (${ruleSource}, ${(rate * 100).toFixed(2)}% deducción): ${paystubs.length} recibos por un total de $${totalAmount.toFixed(2)}. Costo patronal adicional estimado: $${employerCost.toFixed(2)}.`,
       run: updatedRun,
+      employerCost,
     });
   } catch (error: any) {
     console.error("Error en POST /api/v1/corporate/payroll/runs/:id/calculate:", error);
