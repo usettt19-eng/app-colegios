@@ -4,6 +4,20 @@ import { AuthedRequest, requireAuth, requireRole } from "../middleware/auth";
 
 const router = Router();
 
+// Departamentos con los que arranca todo colegio nuevo (estructura
+// organizacional estándar), para que el organigrama no empiece vacío.
+const DEFAULT_DEPARTMENTS = [
+  "Dirección General",
+  "Dirección Operativa",
+  "Finanzas",
+  "Recursos Humanos",
+  "Contabilidad",
+  "TI",
+  "Operaciones",
+  "Coordinación Académica",
+  "Psicología",
+];
+
 // GET /api/v1/tenants
 // Lista todos los colegios de la plataforma (solo super_admin)
 router.get("/", requireAuth, requireRole("super_admin"), async (_req: Request, res: Response) => {
@@ -55,6 +69,13 @@ router.post("/", requireAuth, requireRole("super_admin"), async (req: Request, r
     if (error || !tenant) {
       console.error("Error al crear el colegio:", error);
       return res.status(500).json({ error: "Error al registrar el colegio." });
+    }
+
+    const { error: deptError } = await supabaseAdmin
+      .from("departments")
+      .insert(DEFAULT_DEPARTMENTS.map(name => ({ tenant_id: tenant.id, name })));
+    if (deptError) {
+      console.error("Error al crear los departamentos por defecto:", deptError);
     }
 
     return res.status(201).json({ success: true, message: "Colegio registrado en el sistema.", tenant });

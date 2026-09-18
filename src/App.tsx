@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Network, Database, Globe, Layers, Users, Cpu, ShieldCheck, HelpCircle, Server, FileCode, CheckCircle2, UserCircle, Briefcase, GraduationCap, ClipboardList, Settings2, Crown } from "lucide-react";
+import { Network, Database, Globe, Layers, Users, Cpu, ShieldCheck, HelpCircle, Server, FileCode, CheckCircle2, UserCircle, Briefcase, GraduationCap, ClipboardList, Settings2, Crown, Landmark } from "lucide-react";
 import ArchitectureVisualizer from "./components/ArchitectureVisualizer";
 import DatabaseSchemaExplorer from "./components/DatabaseSchemaExplorer";
 import APIPlayground from "./components/APIPlayground";
@@ -8,13 +8,14 @@ import PortalPreviews from "./components/PortalPreviews";
 import AIAdvisor from "./components/AIAdvisor";
 import { TeacherPortal } from "./portals/TeacherPortal";
 import { CorporatePortal } from "./portals/CorporatePortal";
+import { FinancePortal } from "./portals/FinancePortal";
 import { ParentStudentPortal } from "./portals/ParentStudentPortal";
 import { AdmissionsPortal } from "./portals/AdmissionsPortal";
 import { AdminAdvancedPortal } from "./portals/AdminAdvancedPortal";
 import { SuperAdminPortal } from "./portals/SuperAdminPortal";
 import { AuthProvider } from "./contexts/AuthContext";
 
-type TabId = "diagram" | "database" | "api" | "modules" | "portals" | "ai_advisor" | "teacher_real" | "corporate_real" | "parent_real" | "admissions_real" | "admin_real" | "superadmin_real";
+type TabId = "diagram" | "database" | "api" | "modules" | "portals" | "ai_advisor" | "teacher_real" | "corporate_real" | "finance_real" | "parent_real" | "admissions_real" | "admin_real" | "superadmin_real";
 
 export default function App() {
   return (
@@ -105,6 +106,19 @@ function AppShell() {
           >
             <Briefcase className="w-4 h-4" />
             VER PORTAL ERP
+          </button>
+
+          {/* Finance Portal */}
+          <button
+            onClick={() => setActiveTab("finance_real")}
+            className={`px-4 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all duration-200 shrink-0 cursor-pointer ${
+              activeTab === "finance_real"
+                ? "bg-green-600 text-white shadow-lg shadow-green-600/15"
+                : "text-green-400 hover:text-green-200 hover:bg-slate-800/40 border border-green-900/30"
+            }`}
+          >
+            <Landmark className="w-4 h-4" />
+            VER PORTAL FINANZAS
           </button>
 
           {/* Parent / Student Portal */}
@@ -210,6 +224,11 @@ function AppShell() {
           {activeTab === "corporate_real" && (
             <div className="bg-slate-50 rounded-xl overflow-hidden min-h-[600px]">
               <CorporatePortal />
+            </div>
+          )}
+          {activeTab === "finance_real" && (
+            <div className="bg-slate-50 rounded-xl overflow-hidden min-h-[600px]">
+              <FinancePortal />
             </div>
           )}
           {activeTab === "parent_real" && (

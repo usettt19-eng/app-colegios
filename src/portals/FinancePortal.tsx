@@ -1,0 +1,488 @@
+import React, { useEffect, useState } from 'react';
+import { DollarSign, TrendingUp, TrendingDown, Wallet, Loader2, Plus, FileUp, CalendarClock, CheckCircle2, Landmark } from 'lucide-react';
+
+// Contexto de demostración: en producción tenant_id / profile_id vienen del token JWT de Supabase Auth (Fase 2)
+const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
+const DEMO_ACTOR_ID = '66666666-6666-6666-6666-666666666666';
+
+function readFileName(file: File): string {
+  return file.name;
+}
+
+interface CashflowTotals {
+  total_received?: number;
+  total_pending?: number;
+  total_paid?: number;
+}
+
+interface Transaction {
+  type: 'income' | 'staff_expense' | 'vendor_expense';
+  description: string;
+  amount: number;
+  date: string;
+}
+
+interface Cashflow {
+  income: CashflowTotals;
+  staffExpenses: CashflowTotals;
+  vendorExpenses: CashflowTotals;
+  recentTransactions: Transaction[];
+}
+
+interface Vendor {
+  id: string;
+  name: string;
+  service_type: string | null;
+}
+
+interface PurchaseOrder {
+  id: string;
+  total_cost: number;
+  status: string;
+  quote_title: string | null;
+  quote_file_url: string | null;
+  scheduled_payment_date: string | null;
+  vendors?: { name: string; service_type: string | null };
+  profiles?: { first_name: string; last_name: string } | null;
+}
+
+type TabId = 'flujo' | 'cotizaciones' | 'programar';
+
+const TX_LABEL: Record<Transaction['type'], string> = {
+  income: 'Ingreso (alumno)',
+  staff_expense: 'Egreso (nómina)',
+  vendor_expense: 'Egreso (proveedor)',
+};
+
+export const FinancePortal: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<TabId>('flujo');
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // --- Flujo Financiero ---
+  const [cashflow, setCashflow] = useState<Cashflow | null>(null);
+  const [cashflowLoading, setCashflowLoading] = useState(false);
+
+  // --- Cotizaciones y Compras ---
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [poForm, setPoForm] = useState({ vendor_id: '', total_cost: '', quote_title: '' });
+  const [quoteFileName, setQuoteFileName] = useState('');
+
+  // --- Programar Pagos ---
+  const [scheduleDateByPO, setScheduleDateByPO] = useState<Record<string, string>>({});
+
+  const loadCashflow = async () => {
+    setCashflowLoading(true);
+    try {
+      const response = await fetch(`/api/v1/finance/cashflow?tenant_id=${DEMO_TENANT_ID}`);
+      const data = await response.json();
+      setCashflow(data.cashflow || null);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+    setCashflowLoading(false);
+  };
+
+  const loadProcurement = async () => {
+    try {
+      const [vendorsRes, poRes] = await Promise.all([
+        fetch(`/api/v1/corporate/vendors?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/corporate/purchase-orders?tenant_id=${DEMO_TENANT_ID}`),
+      ]);
+      const vendorsData = await vendorsRes.json();
+      const poData = await poRes.json();
+      setVendors(vendorsData.vendors || []);
+      setPurchaseOrders(poData.purchaseOrders || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'flujo') loadCashflow();
+    if (activeTab === 'cotizaciones' || activeTab === 'programar') loadProcurement();
+  }, [activeTab]);
+
+  const handleCreateQuote = async () => {
+    if (!poForm.vendor_id || !poForm.total_cost || !quoteFileName) {
+      setMessage('❌ Selecciona el proveedor, el costo total y adjunta la cotización.');
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    try {
+      // El archivo real se sube directo a Supabase Storage desde el cliente;
+      // aquí solo registramos la referencia resultante en la orden de compra.
+      const fakeFileUrl = `quotes/${DEMO_TENANT_ID}/${poForm.vendor_id}_${quoteFileName}`;
+      const response = await fetch('/api/v1/corporate/purchase-orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          vendor_id: poForm.vendor_id,
+          requested_by: DEMO_ACTOR_ID,
+          total_cost: Number(poForm.total_cost),
+          quote_title: poForm.quote_title || null,
+          quote_file_url: fakeFileUrl,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Cotización subida, pendiente de aprobación.');
+        setPoForm({ vendor_id: '', total_cost: '', quote_title: '' });
+        setQuoteFileName('');
+        loadProcurement();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo registrar la cotización.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setLoading(false);
+  };
+
+  const handleApprove = async (id: string, status: 'approved' | 'cancelled') => {
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/corporate/purchase-orders/${id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, approved_by: DEMO_ACTOR_ID }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ ' + data.message);
+        loadProcurement();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo actualizar la cotización.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
+  const handleSchedule = async (id: string) => {
+    const date = scheduleDateByPO[id];
+    if (!date) {
+      setMessage('❌ Elige una fecha para programar el pago.');
+      return;
+    }
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/corporate/purchase-orders/${id}/schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduled_payment_date: date, scheduled_by: DEMO_ACTOR_ID }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Pago programado, pendiente de aprobación final.');
+        loadProcurement();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo programar el pago.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
+  const handleConfirmPayment = async (id: string) => {
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/corporate/purchase-orders/${id}/confirm-payment`, { method: 'POST' });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Pago confirmado.');
+        loadProcurement();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo confirmar el pago.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
+  const money = (n: number | undefined) => `$${(n || 0).toFixed(2)}`;
+
+  const statusBadge = (status: string) => {
+    const styles: Record<string, string> = {
+      pending_approval: 'bg-amber-100 text-amber-700',
+      approved: 'bg-blue-100 text-blue-700',
+      scheduled: 'bg-indigo-100 text-indigo-700',
+      paid: 'bg-emerald-100 text-emerald-700',
+      cancelled: 'bg-rose-100 text-rose-700',
+    };
+    return <span className={`px-2 py-1 rounded-full text-xs font-bold ${styles[status] || 'bg-slate-100 text-slate-600'}`}>{status}</span>;
+  };
+
+  return (
+    <div className="p-6 max-w-5xl mx-auto space-y-6 text-slate-800">
+      <div className="flex justify-between items-center bg-white p-5 rounded-xl shadow-sm border border-slate-200">
+        <div className="flex items-center gap-3">
+          <div className="p-3 bg-green-100 rounded-lg text-green-700">
+            <Landmark className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-black text-slate-800">Portal de Finanzas</h1>
+            <p className="text-sm text-slate-500">Flujo financiero, cotizaciones y programación de pagos</p>
+          </div>
+        </div>
+      </div>
+
+      {message && (
+        <div className="bg-green-50 text-green-800 p-4 rounded-lg flex items-center border border-green-200">
+          <CheckCircle2 className="w-5 h-5 mr-2 flex-shrink-0" />
+          <span className="font-medium text-sm">{message}</span>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
+        <button
+          onClick={() => setActiveTab('flujo')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'flujo' ? 'bg-green-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <Wallet className="w-4 h-4 mr-2" /> Flujo Financiero
+        </button>
+        <button
+          onClick={() => setActiveTab('cotizaciones')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'cotizaciones' ? 'bg-green-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <FileUp className="w-4 h-4 mr-2" /> Cotizaciones y Compras
+        </button>
+        <button
+          onClick={() => setActiveTab('programar')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'programar' ? 'bg-green-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <CalendarClock className="w-4 h-4 mr-2" /> Programar Pagos
+        </button>
+      </div>
+
+      {/* Flujo Financiero */}
+      {activeTab === 'flujo' && (
+        cashflowLoading ? (
+          <div className="flex items-center justify-center py-16 text-slate-400">
+            <Loader2 className="w-6 h-6 mr-2 animate-spin" /> Cargando flujo financiero...
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+                <div className="flex items-center text-emerald-600 mb-2"><TrendingUp className="w-4 h-4 mr-2" /><span className="text-xs font-bold uppercase">Ingresos (alumnos)</span></div>
+                <p className="text-2xl font-black text-slate-800">{money(cashflow?.income.total_received)}</p>
+                <p className="text-xs text-slate-400 mt-1">Pendiente por cobrar: {money(cashflow?.income.total_pending)}</p>
+              </div>
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+                <div className="flex items-center text-rose-600 mb-2"><TrendingDown className="w-4 h-4 mr-2" /><span className="text-xs font-bold uppercase">Egresos a Staff (nómina)</span></div>
+                <p className="text-2xl font-black text-slate-800">{money(cashflow?.staffExpenses.total_paid)}</p>
+                <p className="text-xs text-slate-400 mt-1">Pendiente por pagar: {money(cashflow?.staffExpenses.total_pending)}</p>
+              </div>
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+                <div className="flex items-center text-rose-600 mb-2"><TrendingDown className="w-4 h-4 mr-2" /><span className="text-xs font-bold uppercase">Egresos a Proveedores</span></div>
+                <p className="text-2xl font-black text-slate-800">{money(cashflow?.vendorExpenses.total_paid)}</p>
+                <p className="text-xs text-slate-400 mt-1">Pendiente por pagar: {money(cashflow?.vendorExpenses.total_pending)}</p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center">
+                <DollarSign className="w-4 h-4 mr-2 text-green-600" />
+                <h2 className="font-bold text-slate-700">Movimientos Recientes</h2>
+              </div>
+              {!cashflow || cashflow.recentTransactions.length === 0 ? (
+                <p className="p-6 text-sm text-slate-400">Aún no hay movimientos registrados.</p>
+              ) : (
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">TIPO</th>
+                      <th className="px-4 py-3 font-semibold">DESCRIPCIÓN</th>
+                      <th className="px-4 py-3 font-semibold text-right">MONTO</th>
+                      <th className="px-4 py-3 font-semibold">FECHA</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {cashflow.recentTransactions.map((tx, i) => (
+                      <tr key={i} className="hover:bg-slate-50">
+                        <td className="px-4 py-3">
+                          <span className={`text-xs font-bold ${tx.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>{TX_LABEL[tx.type]}</span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">{tx.description}</td>
+                        <td className={`px-4 py-3 text-right font-mono font-bold ${tx.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {tx.type === 'income' ? '+' : '-'}{money(tx.amount)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-400 text-xs">{tx.date ? new Date(tx.date).toLocaleDateString() : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )
+      )}
+
+      {/* Cotizaciones y Compras */}
+      {activeTab === 'cotizaciones' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <h2 className="font-bold text-slate-700 flex items-center"><FileUp className="w-4 h-4 mr-2 text-green-600" /> Subir Cotización</h2>
+            <p className="text-sm text-slate-500">
+              Los responsables de compras y contrataciones de servicios suben aquí la cotización del proveedor para que sea aprobada.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <select
+                value={poForm.vendor_id}
+                onChange={e => setPoForm({ ...poForm, vendor_id: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                <option value="">Selecciona el proveedor</option>
+                {vendors.map(v => <option key={v.id} value={v.id}>{v.name}{v.service_type ? ` (${v.service_type})` : ''}</option>)}
+              </select>
+              <input
+                type="text" placeholder="Concepto (ej. Mantenimiento AC)" value={poForm.quote_title}
+                onChange={e => setPoForm({ ...poForm, quote_title: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+              <input
+                type="number" placeholder="Costo total" value={poForm.total_cost}
+                onChange={e => setPoForm({ ...poForm, total_cost: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <label className="flex items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-lg py-4 cursor-pointer hover:border-green-400 hover:bg-green-50">
+              <FileUp className="w-4 h-4 text-slate-400" />
+              <span className="text-sm text-slate-500">{quoteFileName || 'Selecciona el archivo de la cotización'}</span>
+              <input
+                type="file" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) setQuoteFileName(readFileName(f)); }}
+              />
+            </label>
+            <button
+              onClick={handleCreateQuote}
+              disabled={loading}
+              className="flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 font-semibold"
+            >
+              {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+              Subir Cotización
+            </button>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50">
+              <h2 className="font-bold text-slate-700">Cotizaciones Pendientes de Aprobación</h2>
+            </div>
+            {purchaseOrders.filter(po => po.status === 'pending_approval').length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">No hay cotizaciones pendientes.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {purchaseOrders.filter(po => po.status === 'pending_approval').map(po => (
+                  <div key={po.id} className="p-4 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-semibold text-slate-700">{po.quote_title || po.vendors?.name || 'Cotización'}</p>
+                      <p className="text-xs text-slate-400">{po.vendors?.name} — ${Number(po.total_cost).toFixed(2)}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {statusBadge(po.status)}
+                      <button onClick={() => handleApprove(po.id, 'approved')} className="text-xs font-bold text-emerald-600 hover:underline">Aprobar</button>
+                      <button onClick={() => handleApprove(po.id, 'cancelled')} className="text-xs font-bold text-rose-600 hover:underline">Rechazar</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50">
+              <h2 className="font-bold text-slate-700">Historial de Órdenes de Compra</h2>
+            </div>
+            {purchaseOrders.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay órdenes de compra registradas.</p>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">PROVEEDOR</th>
+                    <th className="px-4 py-3 font-semibold text-right">MONTO</th>
+                    <th className="px-4 py-3 font-semibold">ESTADO</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {purchaseOrders.map(po => (
+                    <tr key={po.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-semibold">{po.vendors?.name || '—'}</td>
+                      <td className="px-4 py-3 text-right font-mono">${Number(po.total_cost).toFixed(2)}</td>
+                      <td className="px-4 py-3">{statusBadge(po.status)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Programar Pagos */}
+      {activeTab === 'programar' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50">
+              <h2 className="font-bold text-slate-700">Aprobadas — Programar Fecha de Pago</h2>
+              <p className="text-xs text-slate-500 mt-1">Contabilidad define cuándo se pagará cada orden ya aprobada.</p>
+            </div>
+            {purchaseOrders.filter(po => po.status === 'approved').length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">No hay órdenes aprobadas esperando programación.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {purchaseOrders.filter(po => po.status === 'approved').map(po => (
+                  <div key={po.id} className="p-4 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-semibold text-slate-700">{po.quote_title || po.vendors?.name}</p>
+                      <p className="text-xs text-slate-400">{po.vendors?.name} — ${Number(po.total_cost).toFixed(2)}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={scheduleDateByPO[po.id] || ''}
+                        onChange={e => setScheduleDateByPO({ ...scheduleDateByPO, [po.id]: e.target.value })}
+                        className="border border-slate-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                      />
+                      <button onClick={() => handleSchedule(po.id)} className="text-xs font-bold text-indigo-600 hover:underline">Programar</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50">
+              <h2 className="font-bold text-slate-700">Programadas — Aprobación Final del Pago</h2>
+              <p className="text-xs text-slate-500 mt-1">Confirma la ejecución del pago ya programado por contabilidad.</p>
+            </div>
+            {purchaseOrders.filter(po => po.status === 'scheduled').length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">No hay pagos programados esperando aprobación final.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {purchaseOrders.filter(po => po.status === 'scheduled').map(po => (
+                  <div key={po.id} className="p-4 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-semibold text-slate-700">{po.quote_title || po.vendors?.name}</p>
+                      <p className="text-xs text-slate-400">
+                        {po.vendors?.name} — ${Number(po.total_cost).toFixed(2)} — programado para {po.scheduled_payment_date ? new Date(po.scheduled_payment_date).toLocaleDateString() : '—'}
+                      </p>
+                    </div>
+                    <button onClick={() => handleConfirmPayment(po.id)} className="flex items-center text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded hover:bg-emerald-100">
+                      <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Aprobar y Confirmar Pago
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

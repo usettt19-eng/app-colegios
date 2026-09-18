@@ -255,6 +255,91 @@ router.get("/payments/:student_id", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/v1/finance/cashflow?tenant_id=...
+// Resumen del flujo financiero del colegio para el Portal de Finanzas:
+// ingresos de los alumnos (pagos recibidos + facturas pendientes) vs.
+// egresos a staff (nómina) y a proveedores (órdenes de compra/servicios).
+router.get("/cashflow", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    const [invoicesRes, paymentsRes, paystubsRes, purchaseOrdersRes] = await Promise.all([
+      supabaseAdmin.from("invoices").select("amount, status").eq("tenant_id", tenant_id),
+      supabaseAdmin
+        .from("payments")
+        .select("amount_paid, payment_date, method, invoices!inner(tenant_id, invoice_number, student_id, students(first_name, last_name))")
+        .eq("invoices.tenant_id", tenant_id)
+        .order("payment_date", { ascending: false })
+        .limit(20),
+      supabaseAdmin
+        .from("paystubs")
+        .select("gross_pay, net_pay, status, payment_date, hr_employees!inner(tenant_id, profiles(first_name, last_name))")
+        .eq("hr_employees.tenant_id", tenant_id),
+      supabaseAdmin.from("purchase_orders").select("total_cost, status, created_at, vendors(name)").eq("tenant_id", tenant_id),
+    ]);
+
+    const invoices = invoicesRes.data || [];
+    const payments = paymentsRes.data || [];
+    const paystubs = paystubsRes.data || [];
+    const purchaseOrders = purchaseOrdersRes.data || [];
+
+    const income = {
+      total_received: invoices.filter((i: any) => i.status === "paid").reduce((sum: number, i: any) => sum + Number(i.amount), 0),
+      total_pending: invoices.filter((i: any) => i.status === "open").reduce((sum: number, i: any) => sum + Number(i.amount), 0),
+    };
+
+    const staffExpenses = {
+      total_paid: paystubs.filter((p: any) => p.status === "paid").reduce((sum: number, p: any) => sum + Number(p.net_pay), 0),
+      total_pending: paystubs.filter((p: any) => p.status === "pending").reduce((sum: number, p: any) => sum + Number(p.net_pay), 0),
+    };
+
+    const vendorExpenses = {
+      total_paid: purchaseOrders.filter((p: any) => p.status === "paid").reduce((sum: number, p: any) => sum + Number(p.total_cost), 0),
+      total_pending: purchaseOrders
+        .filter((p: any) => ["pending_approval", "approved", "scheduled"].includes(p.status))
+        .reduce((sum: number, p: any) => sum + Number(p.total_cost), 0),
+    };
+
+    const recentIncome = payments.map((p: any) => ({
+      type: "income",
+      description: `Pago de ${p.invoices?.students ? `${p.invoices.students.first_name} ${p.invoices.students.last_name}` : "alumno"} - Factura ${p.invoices?.invoice_number || ""}`,
+      amount: Number(p.amount_paid),
+      date: p.payment_date,
+    }));
+
+    const recentPaystubs = paystubs
+      .filter((p: any) => p.status === "paid" && p.payment_date)
+      .map((p: any) => ({
+        type: "staff_expense",
+        description: `Nómina - ${p.hr_employees?.profiles ? `${p.hr_employees.profiles.first_name} ${p.hr_employees.profiles.last_name}` : "empleado"}`,
+        amount: Number(p.net_pay),
+        date: p.payment_date,
+      }));
+
+    const recentPurchases = purchaseOrders
+      .filter((p: any) => p.status === "paid")
+      .map((p: any) => ({
+        type: "vendor_expense",
+        description: `Compra/servicio - ${p.vendors?.name || "proveedor"}`,
+        amount: Number(p.total_cost),
+        date: p.created_at,
+      }));
+
+    const recentTransactions = [...recentIncome, ...recentPaystubs, ...recentPurchases]
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 20);
+
+    return res.status(200).json({
+      success: true,
+      cashflow: { income, staffExpenses, vendorExpenses, recentTransactions },
+    });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/finance/cashflow:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // POST /api/v1/finance/checkout/yappy
 // Inicia el flujo de pago a través de Yappy (Banco General Panamá)
 router.post("/checkout/yappy", async (req: Request, res: Response) => {

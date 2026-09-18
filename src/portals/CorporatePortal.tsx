@@ -1054,6 +1054,7 @@ export const CorporatePortal: React.FC = () => {
                       <td className="px-4 py-3">
                         <span className={`px-2 py-1 rounded-full text-xs font-bold ${
                           po.status === 'paid' ? 'bg-emerald-100 text-emerald-700' :
+                          po.status === 'scheduled' ? 'bg-indigo-100 text-indigo-700' :
                           po.status === 'approved' ? 'bg-blue-100 text-blue-700' :
                           po.status === 'cancelled' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
                         }`}>{po.status}</span>
@@ -1068,14 +1069,8 @@ export const CorporatePortal: React.FC = () => {
                             Aprobar
                           </button>
                         )}
-                        {po.status === 'approved' && (
-                          <button
-                            onClick={() => handleUpdatePOStatus(po.id, 'paid')}
-                            disabled={procurementLoading}
-                            className="text-emerald-600 font-bold hover:text-emerald-800 bg-emerald-50 px-3 py-1 rounded disabled:opacity-50"
-                          >
-                            Marcar Pagada
-                          </button>
+                        {(po.status === 'approved' || po.status === 'scheduled') && (
+                          <span className="text-xs text-slate-400">Programar/pagar desde el Portal de Finanzas</span>
                         )}
                       </td>
                     </tr>

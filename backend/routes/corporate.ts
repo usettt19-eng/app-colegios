@@ -74,17 +74,21 @@ router.get("/purchase-orders", async (req: Request, res: Response) => {
 });
 
 // POST /api/v1/corporate/purchase-orders
-// Crea una orden de compra en estado "pending_approval"
+// Crea una orden de compra en estado "pending_approval", con la cotización
+// adjunta por quien solicita la compra/contratación de servicio.
 router.post("/purchase-orders", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, vendor_id, requested_by, total_cost } = req.body;
+    const { tenant_id, vendor_id, requested_by, total_cost, quote_file_url, quote_title } = req.body;
     if (!tenant_id || !vendor_id || total_cost === undefined) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, vendor_id, total_cost)" });
     }
 
     const { data: purchaseOrder, error } = await supabaseAdmin
       .from("purchase_orders")
-      .insert({ tenant_id, vendor_id, requested_by: requested_by || null, total_cost, status: "pending_approval" })
+      .insert({
+        tenant_id, vendor_id, requested_by: requested_by || null, total_cost, status: "pending_approval",
+        quote_file_url: quote_file_url || null, quote_title: quote_title || null,
+      })
       .select()
       .single();
 
@@ -108,19 +112,27 @@ router.post("/purchase-orders", async (req: Request, res: Response) => {
 });
 
 // POST /api/v1/corporate/purchase-orders/:id/status
-// Avanza el estado de la orden de compra: approved -> paid, o cancelled
+// Aprueba o rechaza la cotización: pending_approval -> approved | cancelled.
+// (Para pasar a "paid" hay que programarla primero con /schedule y luego
+// confirmar el pago con /confirm-payment — ver abajo.)
 router.post("/purchase-orders/:id/status", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { status } = req.body; // 'approved' | 'paid' | 'cancelled'
+    const { status, approved_by } = req.body; // 'approved' | 'cancelled'
 
-    if (!["approved", "paid", "cancelled"].includes(status)) {
-      return res.status(400).json({ error: "Estado inválido. Usa 'approved', 'paid' o 'cancelled'." });
+    if (!["approved", "cancelled"].includes(status)) {
+      return res.status(400).json({ error: "Estado inválido. Usa 'approved' o 'cancelled'." });
+    }
+
+    const { data: current } = await supabaseAdmin.from("purchase_orders").select("status").eq("id", id).single();
+    if (!current) return res.status(404).json({ error: "Orden de compra no encontrada." });
+    if (current.status !== "pending_approval") {
+      return res.status(400).json({ error: "Solo se puede aprobar/rechazar una cotización que esté pendiente de aprobación." });
     }
 
     const { data: purchaseOrder, error } = await supabaseAdmin
       .from("purchase_orders")
-      .update({ status })
+      .update({ status, approved_by: approved_by || null })
       .eq("id", id)
       .select()
       .single();
@@ -130,13 +142,86 @@ router.post("/purchase-orders/:id/status", async (req: Request, res: Response) =
     await supabaseAdmin.from("audit_logs").insert({
       tenant_id: purchaseOrder.tenant_id,
       event_type: "FINANCE",
-      description: `La orden de compra (ID: ${id}) cambió de estado a "${status}".`,
+      description: `La cotización/orden de compra (ID: ${id}) fue "${status === "approved" ? "aprobada" : "rechazada"}".`,
       actor_name: "Procurement System",
     });
 
     return res.status(200).json({ success: true, message: `Orden de compra marcada como "${status}".`, purchaseOrder });
   } catch (error: any) {
     console.error("Error en POST /api/v1/corporate/purchase-orders/:id/status:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/corporate/purchase-orders/:id/schedule
+// Contabilidad propone una fecha de pago para una orden ya aprobada.
+// Queda en "scheduled", a la espera de la aprobación final del pago.
+router.post("/purchase-orders/:id/schedule", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { scheduled_payment_date, scheduled_by } = req.body;
+    if (!scheduled_payment_date) return res.status(400).json({ error: "Falta la fecha programada de pago." });
+
+    const { data: current } = await supabaseAdmin.from("purchase_orders").select("status, tenant_id").eq("id", id).single();
+    if (!current) return res.status(404).json({ error: "Orden de compra no encontrada." });
+    if (current.status !== "approved") {
+      return res.status(400).json({ error: "Solo se puede programar el pago de una orden ya aprobada." });
+    }
+
+    const { data: purchaseOrder, error } = await supabaseAdmin
+      .from("purchase_orders")
+      .update({ status: "scheduled", scheduled_payment_date, scheduled_by: scheduled_by || null })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error || !purchaseOrder) return res.status(500).json({ error: "No se pudo programar el pago." });
+
+    await supabaseAdmin.from("audit_logs").insert({
+      tenant_id: current.tenant_id,
+      event_type: "FINANCE",
+      description: `Contabilidad programó el pago de la orden de compra (ID: ${id}) para el ${scheduled_payment_date}.`,
+      actor_name: "Accounting System",
+    });
+
+    return res.status(200).json({ success: true, message: "Pago programado, pendiente de aprobación final.", purchaseOrder });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/corporate/purchase-orders/:id/schedule:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/corporate/purchase-orders/:id/confirm-payment
+// Aprueba y ejecuta un pago ya programado: scheduled -> paid.
+router.post("/purchase-orders/:id/confirm-payment", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const { data: current } = await supabaseAdmin.from("purchase_orders").select("status, tenant_id, total_cost").eq("id", id).single();
+    if (!current) return res.status(404).json({ error: "Orden de compra no encontrada." });
+    if (current.status !== "scheduled") {
+      return res.status(400).json({ error: "Solo se puede confirmar el pago de una orden con fecha ya programada." });
+    }
+
+    const { data: purchaseOrder, error } = await supabaseAdmin
+      .from("purchase_orders")
+      .update({ status: "paid" })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error || !purchaseOrder) return res.status(500).json({ error: "No se pudo confirmar el pago." });
+
+    await supabaseAdmin.from("audit_logs").insert({
+      tenant_id: current.tenant_id,
+      event_type: "FINANCE",
+      description: `Se aprobó y confirmó el pago de $${current.total_cost} de la orden de compra (ID: ${id}).`,
+      actor_name: "Accounting System",
+    });
+
+    return res.status(200).json({ success: true, message: "Pago confirmado.", purchaseOrder });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/corporate/purchase-orders/:id/confirm-payment:", error);
     return res.status(500).json({ error: "Error interno" });
   }
 });
