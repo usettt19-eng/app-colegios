@@ -55,6 +55,8 @@ import admissionsCrmRoutes from "./backend/routes/admissionsCrm";
 import hrLeaveRoutes from "./backend/routes/hrLeave";
 import facilitiesRoutes from "./backend/routes/facilities";
 import teacherEvaluationsRoutes from "./backend/routes/teacherEvaluations";
+import rbacRoutes from "./backend/routes/rbac";
+import { loadRBACPermissions } from "./backend/middleware/rbac";
 import { startAutoReleaseJob } from "./backend/jobs/autoRelease";
 import { startRecurringExpenseReminderJob } from "./backend/jobs/recurringExpenseReminders";
 
@@ -65,6 +67,8 @@ const app = express();
 // fotos de perfil, y ahora que hay subida real de archivos a Storage
 // (documentStorage.ts) hace falta espacio para PDFs de varias páginas.
 app.use(express.json({ limit: "15mb" }));
+// Load RBAC permissions for authenticated requests
+app.use(loadRBACPermissions);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/pickup", pickupRoutes);
 app.use("/api/v1/webhooks", webhooksRoutes);
@@ -94,6 +98,7 @@ app.use("/api/v1/admissions-crm", admissionsCrmRoutes);
 app.use("/api/v1/hr-leave", hrLeaveRoutes);
 app.use("/api/v1/facilities", facilitiesRoutes);
 app.use("/api/v1/teacher-evaluations", teacherEvaluationsRoutes);
+app.use("/api/v1/rbac", rbacRoutes);
 
 // Iniciar procesos en segundo plano
 startAutoReleaseJob();
