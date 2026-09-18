@@ -33,6 +33,8 @@ interface Employee {
   hire_date: string;
   base_salary: number;
   status: string;
+  employment_type: 'local' | 'expatriate' | 'honorarios';
+  custom_employee_rate: number | null;
   profiles?: { first_name: string; last_name: string; role: string };
 }
 
@@ -80,6 +82,15 @@ interface Vendor {
   service_type: string | null;
 }
 
+interface PayrollMonthSummary {
+  month: string;
+  netPay: number;
+  employerCost: number;
+  grandTotal: number;
+  runsCount: number;
+  hasExtraMonth: boolean;
+}
+
 interface PurchaseOrder {
   id: string;
   total_cost: number;
@@ -120,27 +131,31 @@ export const CorporatePortal: React.FC = () => {
   const [paystubs, setPaystubs] = useState<Paystub[]>([]);
   const [payrollLoading, setPayrollLoading] = useState(false);
 
-  const [employeeForm, setEmployeeForm] = useState({ profile_id: '', hire_date: '', base_salary: '' });
+  const [employeeForm, setEmployeeForm] = useState({ profile_id: '', hire_date: '', base_salary: '', employment_type: 'local', custom_employee_rate: '' });
   const [runForm, setRunForm] = useState({ period_start: '', period_end: '', run_type: 'regular' });
   const [deductionRateOverride, setDeductionRateOverride] = useState<Record<string, string>>({});
   const [countryRule, setCountryRule] = useState<CountryRule | null>(null);
+  const [monthlySummary, setMonthlySummary] = useState<PayrollMonthSummary[]>([]);
 
   const loadPayrollData = async () => {
     try {
-      const [employeesRes, runsRes, staffRes, tenantRes, rulesRes] = await Promise.all([
+      const [employeesRes, runsRes, staffRes, tenantRes, rulesRes, summaryRes] = await Promise.all([
         fetch(`/api/v1/corporate/employees?tenant_id=${DEMO_TENANT_ID}`),
         fetch(`/api/v1/corporate/payroll/runs?tenant_id=${DEMO_TENANT_ID}`),
         fetch(`/api/v1/hierarchy/staff?tenant_id=${DEMO_TENANT_ID}`),
         fetch(`/api/v1/tenants/${DEMO_TENANT_ID}`),
         fetch(`/api/v1/corporate/payroll-country-rules`),
+        fetch(`/api/v1/corporate/payroll/summary?tenant_id=${DEMO_TENANT_ID}`),
       ]);
       const employeesData = await employeesRes.json();
       const runsData = await runsRes.json();
       const staffData = await staffRes.json();
       const tenantData = await tenantRes.json();
       const rulesData = await rulesRes.json();
+      const summaryData = await summaryRes.json();
       setEmployees(employeesData.employees || []);
       setPayrollRuns(runsData.runs || []);
+      setMonthlySummary(summaryData.months || []);
       setStaffOptions(staffData.staff || []);
       const rules: CountryRule[] = rulesData.countryRules || [];
       setCountryRule(rules.find(r => r.country_code === tenantData.tenant?.country) || null);
@@ -422,12 +437,14 @@ export const CorporatePortal: React.FC = () => {
           profile_id: employeeForm.profile_id,
           hire_date: employeeForm.hire_date,
           base_salary: Number(employeeForm.base_salary),
+          employment_type: employeeForm.employment_type,
+          custom_employee_rate: employeeForm.custom_employee_rate ? Number(employeeForm.custom_employee_rate) : undefined,
         }),
       });
       const data = await response.json();
       if (data.success) {
         setMessage('✅ Empleado registrado en nómina.');
-        setEmployeeForm({ profile_id: '', hire_date: '', base_salary: '' });
+        setEmployeeForm({ profile_id: '', hire_date: '', base_salary: '', employment_type: 'local', custom_employee_rate: '' });
         loadPayrollData();
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo registrar al empleado.'));
@@ -751,6 +768,44 @@ export const CorporatePortal: React.FC = () => {
       {/* Nómina y Planillas */}
       {activeTab === 'payroll' && (
         <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center">
+              <Wallet className="w-4 h-4 mr-2 text-blue-600" />
+              <h2 className="font-bold text-slate-700">Acumulado Mensual de Nómina</h2>
+            </div>
+            <p className="px-4 pt-3 text-xs text-slate-500">
+              Suma TODAS las planillas ya calculadas de ese mes (regulares + mes extra), incluyendo el costo patronal adicional (lo que el colegio paga aparte del sueldo, no descontado al empleado) — así ves de un vistazo cuánto cuesta la nómina completa cada mes.
+            </p>
+            {monthlySummary.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay planillas calculadas.</p>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">MES</th>
+                    <th className="px-4 py-3 font-semibold text-right">NETO A EMPLEADOS</th>
+                    <th className="px-4 py-3 font-semibold text-right">COSTO PATRONAL</th>
+                    <th className="px-4 py-3 font-semibold text-right">TOTAL DEL MES</th>
+                    <th className="px-4 py-3 font-semibold text-right"># PLANILLAS</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {monthlySummary.map(m => (
+                    <tr key={m.month} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-semibold">
+                        {m.month}{m.hasExtraMonth && <span className="ml-2 text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">incl. mes extra</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono">${m.netPay.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-slate-500">${m.employerCost.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right font-mono font-bold">${m.grandTotal.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right text-slate-500">{m.runsCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
               <h2 className="font-bold text-slate-700 flex items-center"><Users className="w-4 h-4 mr-2 text-blue-600" /> Dar de Alta Empleado en Nómina</h2>
@@ -787,6 +842,36 @@ export const CorporatePortal: React.FC = () => {
                   />
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-400">Tipo de contratación</label>
+                  <select
+                    value={employeeForm.employment_type}
+                    onChange={e => setEmployeeForm({ ...employeeForm, employment_type: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="local">Local (planilla del país)</option>
+                    <option value="expatriate">Expatriado (regla propia)</option>
+                    <option value="honorarios">Honorarios Profesionales (sin deducciones)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">
+                    {employeeForm.employment_type === 'honorarios' ? '% (no aplica)' : '% personalizado (opcional)'}
+                  </label>
+                  <input
+                    type="number" placeholder="Usa el % del país" value={employeeForm.custom_employee_rate}
+                    onChange={e => setEmployeeForm({ ...employeeForm, custom_employee_rate: e.target.value })}
+                    disabled={employeeForm.employment_type === 'honorarios'}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
+                  />
+                </div>
+              </div>
+              {employeeForm.employment_type === 'expatriate' && (
+                <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-md p-2">
+                  El personal expatriado suele tener reglas de seguro social distintas a las del país; si conoces el % exacto de este empleado, ponlo arriba. Si lo dejas vacío, se calculará igual que el personal local.
+                </p>
+              )}
               <button
                 onClick={handleAddEmployee}
                 disabled={payrollLoading}
@@ -864,6 +949,7 @@ export const CorporatePortal: React.FC = () => {
                   <tr>
                     <th className="px-4 py-3 font-semibold">EMPLEADO</th>
                     <th className="px-4 py-3 font-semibold">ROL</th>
+                    <th className="px-4 py-3 font-semibold">TIPO</th>
                     <th className="px-4 py-3 font-semibold">CONTRATADO</th>
                     <th className="px-4 py-3 font-semibold text-right">SALARIO BASE</th>
                   </tr>
@@ -875,6 +961,15 @@ export const CorporatePortal: React.FC = () => {
                         {emp.profiles ? `${emp.profiles.first_name} ${emp.profiles.last_name}` : 'Sin perfil vinculado'}
                       </td>
                       <td className="px-4 py-3 text-slate-500">{emp.profiles?.role || '—'}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                          emp.employment_type === 'honorarios' ? 'bg-slate-100 text-slate-600' :
+                          emp.employment_type === 'expatriate' ? 'bg-indigo-100 text-indigo-700' : 'bg-emerald-100 text-emerald-700'
+                        }`}>
+                          {emp.employment_type === 'honorarios' ? 'Honorarios' : emp.employment_type === 'expatriate' ? 'Expatriado' : 'Local'}
+                          {emp.custom_employee_rate !== null && emp.employment_type !== 'honorarios' ? ` (${emp.custom_employee_rate}%)` : ''}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-slate-500">{emp.hire_date}</td>
                       <td className="px-4 py-3 text-right font-mono">${Number(emp.base_salary).toFixed(2)}</td>
                     </tr>

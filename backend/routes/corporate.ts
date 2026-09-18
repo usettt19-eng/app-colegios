@@ -634,7 +634,7 @@ router.get("/employees", async (req: Request, res: Response) => {
 // Da de alta a un profesor/administrativo en nómina con su salario base
 router.post("/employees", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, profile_id, hire_date, base_salary, bank_account_info, tax_id } = req.body;
+    const { tenant_id, profile_id, hire_date, base_salary, bank_account_info, tax_id, employment_type, custom_employee_rate } = req.body;
 
     if (!tenant_id || !profile_id || !hire_date || base_salary === undefined) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, profile_id, hire_date, base_salary)" });
@@ -642,7 +642,11 @@ router.post("/employees", async (req: Request, res: Response) => {
 
     const { data: employee, error } = await supabaseAdmin
       .from("hr_employees")
-      .insert({ tenant_id, profile_id, hire_date, base_salary, bank_account_info, tax_id })
+      .insert({
+        tenant_id, profile_id, hire_date, base_salary, bank_account_info, tax_id,
+        employment_type: employment_type || "local",
+        custom_employee_rate: custom_employee_rate !== undefined && custom_employee_rate !== "" ? custom_employee_rate : null,
+      })
       .select()
       .single();
 
@@ -651,10 +655,11 @@ router.post("/employees", async (req: Request, res: Response) => {
       return res.status(500).json({ error: "Error al registrar al empleado en nómina." });
     }
 
+    const typeLabel = employment_type === "honorarios" ? "por honorarios profesionales (sin deducciones)" : employment_type === "expatriate" ? "expatriado" : "local";
     await supabaseAdmin.from("audit_logs").insert({
       tenant_id,
       event_type: "HR",
-      description: `Se dio de alta en nómina al empleado (perfil ID: ${profile_id}) con salario base $${base_salary}.`,
+      description: `Se dio de alta en nómina al empleado (perfil ID: ${profile_id}) con salario base $${base_salary}, tipo: ${typeLabel}.`,
       actor_name: "HR System",
     });
 
@@ -682,6 +687,46 @@ router.get("/payroll/runs", async (req: Request, res: Response) => {
     return res.status(200).json({ success: true, runs: data });
   } catch (error: any) {
     console.error("Error en GET /api/v1/corporate/payroll/runs:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// GET /api/v1/corporate/payroll/summary?tenant_id=...
+// Acumulado mensual de nómina: agrupa TODAS las planillas ya calculadas
+// (regulares + mes extra) por mes de inicio de periodo, sumando neto
+// pagado a empleados, costo patronal adicional y el total general
+// (lo que realmente le cuesta la nómina al colegio ese mes).
+router.get("/payroll/summary", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    const { data: runs, error } = await supabaseAdmin
+      .from("payroll_runs")
+      .select("period_start, run_type, total_amount, employer_cost, status")
+      .eq("tenant_id", tenant_id)
+      .in("status", ["approved", "paid"])
+      .order("period_start");
+
+    if (error) return res.status(500).json({ error: "Error al consultar el acumulado de nómina." });
+
+    const byMonth: Record<string, { netPay: number; employerCost: number; runsCount: number; hasExtraMonth: boolean }> = {};
+    for (const run of runs || []) {
+      const month = String(run.period_start).slice(0, 7); // "YYYY-MM"
+      if (!byMonth[month]) byMonth[month] = { netPay: 0, employerCost: 0, runsCount: 0, hasExtraMonth: false };
+      byMonth[month].netPay += Number(run.total_amount || 0);
+      byMonth[month].employerCost += Number(run.employer_cost || 0);
+      byMonth[month].runsCount += 1;
+      if (run.run_type === "extra_month") byMonth[month].hasExtraMonth = true;
+    }
+
+    const months = Object.entries(byMonth)
+      .map(([month, totals]) => ({ month, ...totals, grandTotal: Number((totals.netPay + totals.employerCost).toFixed(2)) }))
+      .sort((a, b) => b.month.localeCompare(a.month));
+
+    return res.status(200).json({ success: true, months });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/corporate/payroll/summary:", error);
     return res.status(500).json({ error: "Error interno" });
   }
 });
@@ -751,7 +796,7 @@ router.post("/payroll/runs/:id/calculate", async (req: Request, res: Response) =
 
     const { data: employees, error: employeesError } = await supabaseAdmin
       .from("hr_employees")
-      .select("id, base_salary")
+      .select("id, base_salary, employment_type, custom_employee_rate")
       .eq("tenant_id", run.tenant_id)
       .eq("status", "active");
 
@@ -784,10 +829,23 @@ router.post("/payroll/runs/:id/calculate", async (req: Request, res: Response) =
       }
     }
 
-    const rate = typeof deduction_rate === "number" ? deduction_rate : employeeRatePercent / 100;
+    const defaultRate = typeof deduction_rate === "number" ? deduction_rate : employeeRatePercent / 100;
+
+    // El % de deducción del país es el default para empleados "local".
+    // Honorarios profesionales no es relación de planilla: no se le
+    // descuenta nada. Expatriados (u otro caso especial) usan su propio
+    // % si se configuró uno en el empleado, en vez del % del país.
+    const rateForEmployee = (emp: any): number => {
+      if (emp.employment_type === "honorarios") return 0;
+      if (emp.custom_employee_rate !== null && emp.custom_employee_rate !== undefined) {
+        return Number(emp.custom_employee_rate) / 100;
+      }
+      return defaultRate;
+    };
 
     const paystubs = employees.map(emp => {
       const grossPay = Number(emp.base_salary);
+      const rate = rateForEmployee(emp);
       const deductions = Number((grossPay * rate).toFixed(2));
       const netPay = Number((grossPay - deductions).toFixed(2));
       return {
@@ -807,12 +865,16 @@ router.post("/payroll/runs/:id/calculate", async (req: Request, res: Response) =
     }
 
     const totalAmount = paystubs.reduce((sum, p) => sum + p.net_pay, 0);
-    const totalGross = paystubs.reduce((sum, p) => sum + p.gross_pay, 0);
-    const employerCost = Number((totalGross * (employerRatePercent / 100)).toFixed(2));
+    // El costo patronal solo aplica a empleados en relación de planilla
+    // (local/expatriado); honorarios profesionales no genera cuota patronal.
+    const totalGrossForEmployerCost = employees
+      .filter(emp => emp.employment_type !== "honorarios")
+      .reduce((sum, emp) => sum + Number(emp.base_salary), 0);
+    const employerCost = Number((totalGrossForEmployerCost * (employerRatePercent / 100)).toFixed(2));
 
     const { data: updatedRun, error: updateError } = await supabaseAdmin
       .from("payroll_runs")
-      .update({ total_amount: totalAmount, status: "approved" })
+      .update({ total_amount: totalAmount, employer_cost: employerCost, status: "approved" })
       .eq("id", id)
       .select()
       .single();
@@ -825,13 +887,13 @@ router.post("/payroll/runs/:id/calculate", async (req: Request, res: Response) =
     await supabaseAdmin.from("audit_logs").insert({
       tenant_id: run.tenant_id,
       event_type: "HR",
-      description: `Planilla ${run.period_start} a ${run.period_end} calculada con reglas de ${ruleSource} (${(rate * 100).toFixed(2)}% deducción empleado): ${paystubs.length} recibos por un total de $${totalAmount.toFixed(2)}. Costo patronal adicional estimado: $${employerCost.toFixed(2)}.`,
+      description: `Planilla ${run.period_start} a ${run.period_end} calculada con reglas de ${ruleSource} (${(defaultRate * 100).toFixed(2)}% deducción base): ${paystubs.length} recibos por un total de $${totalAmount.toFixed(2)}. Costo patronal adicional estimado: $${employerCost.toFixed(2)}.`,
       actor_name: "HR System",
     });
 
     return res.status(200).json({
       success: true,
-      message: `Planilla calculada (${ruleSource}, ${(rate * 100).toFixed(2)}% deducción): ${paystubs.length} recibos por un total de $${totalAmount.toFixed(2)}. Costo patronal adicional estimado: $${employerCost.toFixed(2)}.`,
+      message: `Planilla calculada (${ruleSource}, ${(defaultRate * 100).toFixed(2)}% deducción base): ${paystubs.length} recibos por un total de $${totalAmount.toFixed(2)}. Costo patronal adicional estimado: $${employerCost.toFixed(2)}.`,
       run: updatedRun,
       employerCost,
     });
