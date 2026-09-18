@@ -1,15 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { Calendar, CheckSquare, AlertTriangle, Send, BookOpen, Plus, Loader2, ClipboardCheck } from 'lucide-react';
+import { Calendar, CheckSquare, AlertTriangle, Send, BookOpen, Plus, Loader2, ClipboardCheck, GraduationCap, MessageSquare, Award } from 'lucide-react';
+import { MessagingInbox } from './MessagingInbox';
 
 // Contexto de demostración: en producción estos IDs vienen del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
 const DEMO_TEACHER_ID = '44444444-4444-4444-4444-444444444444';
 
-type TabId = 'attendance' | 'assignments';
+type TabId = 'attendance' | 'assignments' | 'grades' | 'messages';
 
 interface ClassGroup {
   id: string;
   name: string;
+  term_id?: string;
   courses?: { name: string; code: string };
 }
 
@@ -19,6 +21,16 @@ interface RosterStudent {
   last_name: string;
   photo_url?: string | null;
   status?: string;
+}
+
+interface GradeRosterStudent {
+  class_enrollment_id: string;
+  enrollment_id: string;
+  student_id: string;
+  first_name: string;
+  last_name: string;
+  photo_url?: string | null;
+  final_grade: number | null;
 }
 
 interface Assignment {
@@ -48,8 +60,14 @@ export const TeacherPortal: React.FC = () => {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string>('');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [assignmentForm, setAssignmentForm] = useState({ title: '', description: '', due_date: '', max_score: '100' });
+  const [assignmentForm, setAssignmentForm] = useState({ title: '', description: '', due_date: '', max_score: '100', type: 'tarea' });
   const [scoreDrafts, setScoreDrafts] = useState<Record<string, string>>({});
+
+  // --- Notas Finales y Boletines ---
+  const [gradesRoster, setGradesRoster] = useState<GradeRosterStudent[]>([]);
+  const [gradesLoading, setGradesLoading] = useState(false);
+  const [gradeDrafts, setGradeDrafts] = useState<Record<string, string>>({});
+  const [bulletinLoadingId, setBulletinLoadingId] = useState<string | null>(null);
 
   useEffect(() => {
     const loadClasses = async () => {
@@ -70,7 +88,89 @@ export const TeacherPortal: React.FC = () => {
     if (!selectedClassId) return;
     loadRoster();
     if (activeTab === 'assignments') loadAssignments();
+    if (activeTab === 'grades') loadGradesRoster();
   }, [selectedClassId, activeTab]);
+
+  const loadGradesRoster = async () => {
+    setGradesLoading(true);
+    try {
+      const response = await fetch(`/api/v1/academics/classes/${selectedClassId}/roster`);
+      const data = await response.json();
+      setGradesRoster(data.roster || []);
+    } catch {
+      setMessage('❌ No se pudo cargar la lista de notas finales.');
+    }
+    setGradesLoading(false);
+  };
+
+  const handleSaveFinalGrade = async (classEnrollmentId: string) => {
+    const grade = gradeDrafts[classEnrollmentId];
+    if (!grade) {
+      setMessage('❌ Indica una nota antes de guardar.');
+      return;
+    }
+    setIsSubmitting(true);
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/academics/class-enrollments/${classEnrollmentId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ final_grade: grade }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Nota final guardada.');
+        loadGradesRoster();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo guardar la nota.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setIsSubmitting(false);
+  };
+
+  const handleGenerateBulletin = async (student: GradeRosterStudent) => {
+    if (!currentClass?.term_id) {
+      setMessage('❌ No se pudo determinar el ciclo académico de esta clase.');
+      return;
+    }
+    setBulletinLoadingId(student.class_enrollment_id);
+    setMessage('');
+    try {
+      const genResponse = await fetch('/api/v1/bulletins/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          term_id: currentClass.term_id,
+          student_id: student.student_id,
+          enrollment_id: student.enrollment_id,
+        }),
+      });
+      const genData = await genResponse.json();
+      if (!genData.success) {
+        setMessage('❌ ' + (genData.error || 'No se pudo generar el boletín.'));
+        setBulletinLoadingId(null);
+        return;
+      }
+
+      const pubResponse = await fetch('/api/v1/bulletins/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report_card_id: genData.reportCard.id }),
+      });
+      const pubData = await pubResponse.json();
+      if (pubData.success) {
+        setMessage(`✅ Boletín de ${student.first_name} ${student.last_name} generado y publicado. El padre ya fue notificado.`);
+      } else {
+        setMessage('❌ ' + (pubData.error || 'El boletín se generó pero no se pudo publicar.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setBulletinLoadingId(null);
+  };
 
   const loadRoster = async () => {
     try {
@@ -142,12 +242,13 @@ export const TeacherPortal: React.FC = () => {
           description: assignmentForm.description,
           due_date: assignmentForm.due_date,
           max_score: Number(assignmentForm.max_score) || 100,
+          type: assignmentForm.type,
         }),
       });
       const data = await response.json();
       if (data.success) {
         setMessage('✅ Tarea creada y asignada a los alumnos.');
-        setAssignmentForm({ title: '', description: '', due_date: '', max_score: '100' });
+        setAssignmentForm({ title: '', description: '', due_date: '', max_score: '100', type: 'tarea' });
         loadAssignments();
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo crear la tarea.'));
@@ -242,6 +343,18 @@ export const TeacherPortal: React.FC = () => {
             className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center text-sm ${activeTab === 'assignments' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}
           >
             <BookOpen className="w-4 h-4 mr-2" /> Tareas y Calificaciones
+          </button>
+          <button
+            onClick={() => setActiveTab('grades')}
+            className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center text-sm ${activeTab === 'grades' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}
+          >
+            <GraduationCap className="w-4 h-4 mr-2" /> Notas Finales
+          </button>
+          <button
+            onClick={() => setActiveTab('messages')}
+            className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center text-sm ${activeTab === 'messages' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}
+          >
+            <MessageSquare className="w-4 h-4 mr-2" /> Mensajería
           </button>
         </div>
       )}
@@ -340,7 +453,17 @@ export const TeacherPortal: React.FC = () => {
               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               rows={2}
             />
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
+              <select
+                value={assignmentForm.type}
+                onChange={e => setAssignmentForm({ ...assignmentForm, type: e.target.value })}
+                className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="tarea">Tarea</option>
+                <option value="examen">Examen</option>
+                <option value="actividad">Actividad</option>
+                <option value="proyecto">Proyecto</option>
+              </select>
               <input
                 type="date" value={assignmentForm.due_date}
                 onChange={e => setAssignmentForm({ ...assignmentForm, due_date: e.target.value })}
@@ -352,6 +475,7 @@ export const TeacherPortal: React.FC = () => {
                 className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
+            <p className="text-xs text-gray-400">El tipo determina cómo se ve en el calendario "Notas y Agendas" del padre (Tarea/Examen/Actividad/Proyecto).</p>
             <button
               onClick={handleCreateAssignment}
               disabled={isSubmitting}
@@ -426,6 +550,60 @@ export const TeacherPortal: React.FC = () => {
             </div>
           )}
         </div>
+      )}
+
+      {activeTab === 'grades' && classes.length > 0 && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center">
+            <GraduationCap className="w-5 h-5 text-indigo-600 mr-2" />
+            <h2 className="font-semibold text-gray-800">Notas Finales de {currentClass?.courses?.name || 'la materia'}</h2>
+          </div>
+          {gradesLoading ? (
+            <div className="flex items-center justify-center py-12 text-gray-400">
+              <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Cargando notas...
+            </div>
+          ) : gradesRoster.length === 0 ? (
+            <p className="p-6 text-sm text-gray-400">No hay alumnos matriculados en este grupo.</p>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {gradesRoster.map(student => (
+                <div key={student.class_enrollment_id} className="p-4 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-gray-800">{student.first_name} {student.last_name}</p>
+                    <p className="text-xs text-gray-500">Nota actual: {student.final_grade ?? '—'}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number" step="0.01" placeholder="Nota" defaultValue={student.final_grade ?? ''}
+                      onChange={e => setGradeDrafts({ ...gradeDrafts, [student.class_enrollment_id]: e.target.value })}
+                      className="w-20 border border-gray-300 rounded-md px-2 py-1 text-sm"
+                    />
+                    <button
+                      onClick={() => handleSaveFinalGrade(student.class_enrollment_id)}
+                      disabled={isSubmitting}
+                      className="text-indigo-600 font-bold hover:text-indigo-800 bg-indigo-50 px-3 py-1 rounded text-sm disabled:opacity-50"
+                    >
+                      Guardar
+                    </button>
+                    <button
+                      onClick={() => handleGenerateBulletin(student)}
+                      disabled={bulletinLoadingId === student.class_enrollment_id || student.final_grade === null}
+                      title={student.final_grade === null ? 'Guarda una nota final primero' : 'Genera y publica el boletín del alumno'}
+                      className="flex items-center text-emerald-600 font-bold hover:text-emerald-800 bg-emerald-50 px-3 py-1 rounded text-sm disabled:opacity-50"
+                    >
+                      {bulletinLoadingId === student.class_enrollment_id ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Award className="w-4 h-4 mr-1" />}
+                      Boletín
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'messages' && (
+        <MessagingInbox tenantId={DEMO_TENANT_ID} profileId={DEMO_TEACHER_ID} recipientRole="parent" />
       )}
     </div>
   );

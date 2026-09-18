@@ -33,12 +33,20 @@ type Folder = 'recibidos' | 'enviados';
 interface Props {
   tenantId: string;
   profileId: string;
+  recipientRole?: 'staff' | 'parent';
 }
+
+const ROLE_LABELS: Record<string, string> = {
+  teacher: 'Docente',
+  admin: 'Administración',
+  super_admin: 'Administración',
+  parent: 'Padre/Madre',
+};
 
 const fmtDateTime = (iso: string) =>
   new Date(iso).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-export const MessagingInbox: React.FC<Props> = ({ tenantId, profileId }) => {
+export const MessagingInbox: React.FC<Props> = ({ tenantId, profileId, recipientRole = 'staff' }) => {
   const [folder, setFolder] = useState<Folder>('recibidos');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,7 +76,7 @@ export const MessagingInbox: React.FC<Props> = ({ tenantId, profileId }) => {
 
   useEffect(() => {
     loadConversations();
-    fetch(`/api/v1/messages/recipients?tenant_id=${tenantId}`)
+    fetch(`/api/v1/messages/recipients?tenant_id=${tenantId}&exclude_id=${profileId}&role=${recipientRole}`)
       .then(r => r.json())
       .then(d => setRecipients(d.recipients || []))
       .catch(() => {});
@@ -225,7 +233,7 @@ export const MessagingInbox: React.FC<Props> = ({ tenantId, profileId }) => {
                 >
                   <option value="">Selecciona un destinatario...</option>
                   {recipients.map(r => (
-                    <option key={r.id} value={r.id}>{r.first_name} {r.last_name} ({r.role === 'teacher' ? 'Docente' : 'Administración'})</option>
+                    <option key={r.id} value={r.id}>{r.first_name} {r.last_name} ({ROLE_LABELS[r.role] || r.role})</option>
                   ))}
                 </select>
               </div>

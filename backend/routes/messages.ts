@@ -3,19 +3,28 @@ import { supabaseAdmin } from "../supabase";
 
 const router = Router();
 
-// GET /api/v1/messages/recipients?tenant_id=...
-// Lista al staff del colegio (admin/teacher) para el selector de "Nuevo Mensaje"
+// GET /api/v1/messages/recipients?tenant_id=...&exclude_id=...&role=parent|staff
+// Lista los posibles destinatarios para el selector de "Nuevo Mensaje".
+// - role=staff (o sin especificar, para compatibilidad con el Portal de Padres):
+//   admin/super_admin/teacher del colegio.
+// - role=parent (usado por el Portal del Docente, para escribirle a un padre):
+//   todos los perfiles con role='parent' del colegio.
 router.get("/recipients", async (req: Request, res: Response) => {
   try {
-    const { tenant_id } = req.query;
+    const { tenant_id, exclude_id, role } = req.query;
     if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
 
-    const { data, error } = await supabaseAdmin
+    const roles = role === "parent" ? ["parent"] : ["admin", "super_admin", "teacher"];
+
+    let query = supabaseAdmin
       .from("profiles")
       .select("id, first_name, last_name, role")
       .eq("tenant_id", tenant_id)
-      .in("role", ["admin", "super_admin", "teacher"])
-      .order("first_name");
+      .in("role", roles);
+
+    if (exclude_id) query = query.neq("id", exclude_id);
+
+    const { data, error } = await query.order("first_name");
 
     if (error) return res.status(500).json({ error: "Error al consultar los destinatarios." });
     return res.status(200).json({ success: true, recipients: data });

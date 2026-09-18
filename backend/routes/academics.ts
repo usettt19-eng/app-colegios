@@ -154,13 +154,14 @@ router.get("/classes/:id/roster", async (req: Request, res: Response) => {
 
     const { data, error } = await supabaseAdmin
       .from("class_enrollments")
-      .select("id, final_grade, enrollments!inner(student_id, students(id, first_name, last_name, photo_url))")
+      .select("id, final_grade, enrollment_id, enrollments!inner(student_id, students(id, first_name, last_name, photo_url))")
       .eq("class_id", id);
 
     if (error) return res.status(500).json({ error: "Error al consultar el roster de la clase." });
 
     const roster = (data || []).map((ce: any) => ({
       class_enrollment_id: ce.id,
+      enrollment_id: ce.enrollment_id,
       final_grade: ce.final_grade,
       student_id: ce.enrollments?.student_id,
       first_name: ce.enrollments?.students?.first_name,
@@ -171,6 +172,34 @@ router.get("/classes/:id/roster", async (req: Request, res: Response) => {
     return res.status(200).json({ success: true, roster });
   } catch (error: any) {
     console.error("Error en GET /api/v1/academics/classes/:id/roster:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// PATCH /api/v1/academics/class-enrollments/:id
+// El docente registra/actualiza la nota final del alumno en esta materia
+// (alimenta el cálculo de GPA al generar el boletín)
+router.patch("/class-enrollments/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { final_grade } = req.body;
+
+    if (final_grade === undefined || final_grade === null || final_grade === "") {
+      return res.status(400).json({ error: "Falta la nota final." });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("class_enrollments")
+      .update({ final_grade: Number(final_grade) })
+      .eq("id", id)
+      .select("id, final_grade, enrollment_id")
+      .single();
+
+    if (error || !data) return res.status(404).json({ error: "Matrícula de clase no encontrada." });
+
+    return res.status(200).json({ success: true, message: "Nota final guardada.", classEnrollment: data });
+  } catch (error: any) {
+    console.error("Error en PATCH /api/v1/academics/class-enrollments/:id:", error);
     return res.status(500).json({ error: "Error interno" });
   }
 });
