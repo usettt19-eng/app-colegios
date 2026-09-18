@@ -255,6 +255,58 @@ router.get("/payments/:student_id", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/v1/finance/tax-summary?tenant_id=...&year=2026
+// Impuestos pagados a proveedores (ej. ITBMS) agrupados por mes, para que
+// contabilidad los pueda reportar/reclamar en las declaraciones fiscales.
+router.get("/tax-summary", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, year } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    const targetYear = year ? Number(year) : new Date().getFullYear();
+    const from = `${targetYear}-01-01`;
+    const to = `${targetYear + 1}-01-01`;
+
+    const { data, error } = await supabaseAdmin
+      .from("purchase_orders")
+      .select("paid_at, subtotal, tax_rate, tax_amount, total_cost, vendors(name)")
+      .eq("tenant_id", tenant_id)
+      .eq("status", "paid")
+      .gte("paid_at", from)
+      .lt("paid_at", to)
+      .order("paid_at");
+
+    if (error) return res.status(500).json({ error: "Error al consultar los impuestos pagados." });
+
+    const orders = data || [];
+    const totalSubtotal = orders.reduce((sum: number, o: any) => sum + Number(o.subtotal || 0), 0);
+    const totalTax = orders.reduce((sum: number, o: any) => sum + Number(o.tax_amount || 0), 0);
+
+    const byMonth: Record<string, { subtotal: number; tax: number }> = {};
+    for (const o of orders as any[]) {
+      if (!o.paid_at) continue;
+      const month = String(o.paid_at).slice(0, 7); // "YYYY-MM"
+      if (!byMonth[month]) byMonth[month] = { subtotal: 0, tax: 0 };
+      byMonth[month].subtotal += Number(o.subtotal || 0);
+      byMonth[month].tax += Number(o.tax_amount || 0);
+    }
+
+    return res.status(200).json({
+      success: true,
+      taxSummary: {
+        year: targetYear,
+        totalSubtotal: Number(totalSubtotal.toFixed(2)),
+        totalTax: Number(totalTax.toFixed(2)),
+        byMonth,
+        orders,
+      },
+    });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/finance/tax-summary:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // GET /api/v1/finance/cashflow?tenant_id=...
 // Resumen del flujo financiero del colegio para el Portal de Finanzas:
 // ingresos de los alumnos (pagos recibidos + facturas pendientes) vs.

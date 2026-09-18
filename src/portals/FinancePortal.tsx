@@ -43,6 +43,9 @@ interface Vendor {
 
 interface PurchaseOrder {
   id: string;
+  subtotal: number | null;
+  tax_rate: number | null;
+  tax_amount: number | null;
   total_cost: number;
   status: string;
   quote_title: string | null;
@@ -59,8 +62,15 @@ interface RecurringExpense {
   concept: string;
   estimated_amount: number;
   due_day: number;
+  tax_rate: number;
   is_active: boolean;
   vendors?: { name: string; service_type: string | null };
+}
+
+interface TaxSummary {
+  year: number;
+  totalSubtotal: number;
+  totalTax: number;
 }
 
 type TabId = 'flujo' | 'cotizaciones' | 'programar';
@@ -83,13 +93,16 @@ export const FinancePortal: React.FC = () => {
   // --- Cotizaciones y Compras ---
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
-  const [poForm, setPoForm] = useState({ vendor_id: '', total_cost: '', quote_title: '' });
+  const [poForm, setPoForm] = useState({ vendor_id: '', subtotal: '', tax_rate: '7', quote_title: '' });
   const [quoteFileName, setQuoteFileName] = useState('');
 
   // --- Gastos Recurrentes Mensuales (energía, agua, internet...) ---
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
-  const [recurringForm, setRecurringForm] = useState({ vendor_id: '', concept: '', estimated_amount: '', due_day: '5' });
+  const [recurringForm, setRecurringForm] = useState({ vendor_id: '', concept: '', estimated_amount: '', due_day: '5', tax_rate: '7' });
   const [generateAmountByRE, setGenerateAmountByRE] = useState<Record<string, string>>({});
+
+  // --- Resumen de Impuestos (para declaraciones) ---
+  const [taxSummary, setTaxSummary] = useState<TaxSummary | null>(null);
 
   // --- Programar Pagos ---
   const [scheduleDateByPO, setScheduleDateByPO] = useState<Record<string, string>>({});
@@ -97,9 +110,14 @@ export const FinancePortal: React.FC = () => {
   const loadCashflow = async () => {
     setCashflowLoading(true);
     try {
-      const response = await fetch(`/api/v1/finance/cashflow?tenant_id=${DEMO_TENANT_ID}`);
-      const data = await response.json();
-      setCashflow(data.cashflow || null);
+      const [cashflowRes, taxRes] = await Promise.all([
+        fetch(`/api/v1/finance/cashflow?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/finance/tax-summary?tenant_id=${DEMO_TENANT_ID}`),
+      ]);
+      const cashflowData = await cashflowRes.json();
+      const taxData = await taxRes.json();
+      setCashflow(cashflowData.cashflow || null);
+      setTaxSummary(taxData.taxSummary || null);
     } catch {
       setMessage('❌ No se pudo conectar con el servidor SIS.');
     }
@@ -146,12 +164,13 @@ export const FinancePortal: React.FC = () => {
           concept: recurringForm.concept,
           estimated_amount: Number(recurringForm.estimated_amount),
           due_day: Number(recurringForm.due_day),
+          tax_rate: Number(recurringForm.tax_rate || 0),
         }),
       });
       const data = await response.json();
       if (data.success) {
         setMessage('✅ Gasto recurrente configurado.');
-        setRecurringForm({ vendor_id: '', concept: '', estimated_amount: '', due_day: '5' });
+        setRecurringForm({ vendor_id: '', concept: '', estimated_amount: '', due_day: '5', tax_rate: '7' });
         loadProcurement();
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo configurar el gasto recurrente.'));
@@ -189,8 +208,8 @@ export const FinancePortal: React.FC = () => {
   };
 
   const handleCreateQuote = async () => {
-    if (!poForm.vendor_id || !poForm.total_cost || !quoteFileName) {
-      setMessage('❌ Selecciona el proveedor, el costo total y adjunta la cotización.');
+    if (!poForm.vendor_id || !poForm.subtotal || !quoteFileName) {
+      setMessage('❌ Selecciona el proveedor, el subtotal y adjunta la cotización.');
       return;
     }
     setLoading(true);
@@ -206,7 +225,8 @@ export const FinancePortal: React.FC = () => {
           tenant_id: DEMO_TENANT_ID,
           vendor_id: poForm.vendor_id,
           requested_by: DEMO_ACTOR_ID,
-          total_cost: Number(poForm.total_cost),
+          subtotal: Number(poForm.subtotal),
+          tax_rate: Number(poForm.tax_rate || 0),
           quote_title: poForm.quote_title || null,
           quote_file_url: fakeFileUrl,
         }),
@@ -214,7 +234,7 @@ export const FinancePortal: React.FC = () => {
       const data = await response.json();
       if (data.success) {
         setMessage('✅ Cotización subida, pendiente de aprobación.');
-        setPoForm({ vendor_id: '', total_cost: '', quote_title: '' });
+        setPoForm({ vendor_id: '', subtotal: '', tax_rate: '7', quote_title: '' });
         setQuoteFileName('');
         loadProcurement();
       } else {
@@ -368,6 +388,14 @@ export const FinancePortal: React.FC = () => {
               </div>
             </div>
 
+            {taxSummary && (
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+                <div className="flex items-center text-indigo-600 mb-2"><Landmark className="w-4 h-4 mr-2" /><span className="text-xs font-bold uppercase">Impuestos Pagados a Proveedores ({taxSummary.year})</span></div>
+                <p className="text-2xl font-black text-slate-800">{money(taxSummary.totalTax)}</p>
+                <p className="text-xs text-slate-400 mt-1">Sobre un subtotal de {money(taxSummary.totalSubtotal)} — para reportar/deducir en declaraciones fiscales.</p>
+              </div>
+            )}
+
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center">
                 <DollarSign className="w-4 h-4 mr-2 text-green-600" />
@@ -429,13 +457,18 @@ export const FinancePortal: React.FC = () => {
                 className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               />
               <input
-                type="number" placeholder="Monto estimado" value={recurringForm.estimated_amount}
+                type="number" placeholder="Monto estimado (antes de impuesto)" value={recurringForm.estimated_amount}
                 onChange={e => setRecurringForm({ ...recurringForm, estimated_amount: e.target.value })}
                 className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               />
               <input
                 type="number" placeholder="Día de pago" value={recurringForm.due_day} min={1} max={28}
                 onChange={e => setRecurringForm({ ...recurringForm, due_day: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+              <input
+                type="number" placeholder="% Impuesto (ej. ITBMS 7%)" value={recurringForm.tax_rate}
+                onChange={e => setRecurringForm({ ...recurringForm, tax_rate: e.target.value })}
                 className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               />
             </div>
@@ -458,7 +491,7 @@ export const FinancePortal: React.FC = () => {
                     <div key={re.id} className="py-3 flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <p className="font-semibold text-slate-700">{re.concept}</p>
-                        <p className="text-xs text-slate-400">{re.vendors?.name} — estimado ${Number(re.estimated_amount).toFixed(2)} — día {re.due_day}</p>
+                        <p className="text-xs text-slate-400">{re.vendors?.name} — estimado ${Number(re.estimated_amount).toFixed(2)} + {re.tax_rate}% imp. — día {re.due_day}</p>
                       </div>
                       {alreadyGenerated ? (
                         <span className="text-xs font-bold text-emerald-600">✓ Ya generado para {currentBillingPeriod()}</span>
@@ -490,7 +523,7 @@ export const FinancePortal: React.FC = () => {
             <p className="text-sm text-slate-500">
               Los responsables de compras y contrataciones de servicios suben aquí la cotización del proveedor para que sea aprobada.
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <select
                 value={poForm.vendor_id}
                 onChange={e => setPoForm({ ...poForm, vendor_id: e.target.value })}
@@ -504,11 +537,21 @@ export const FinancePortal: React.FC = () => {
                 onChange={e => setPoForm({ ...poForm, quote_title: e.target.value })}
                 className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <input
-                type="number" placeholder="Costo total" value={poForm.total_cost}
-                onChange={e => setPoForm({ ...poForm, total_cost: e.target.value })}
+                type="number" placeholder="Subtotal (antes de impuesto)" value={poForm.subtotal}
+                onChange={e => setPoForm({ ...poForm, subtotal: e.target.value })}
                 className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               />
+              <input
+                type="number" placeholder="% Impuesto (ej. ITBMS 7%)" value={poForm.tax_rate}
+                onChange={e => setPoForm({ ...poForm, tax_rate: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+              <div className="flex items-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm font-bold text-slate-700">
+                Total: ${(Number(poForm.subtotal || 0) * (1 + Number(poForm.tax_rate || 0) / 100)).toFixed(2)}
+              </div>
             </div>
             <label className="flex items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-lg py-4 cursor-pointer hover:border-green-400 hover:bg-green-50">
               <FileUp className="w-4 h-4 text-slate-400" />
@@ -540,7 +583,10 @@ export const FinancePortal: React.FC = () => {
                   <div key={po.id} className="p-4 flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <p className="font-semibold text-slate-700">{po.quote_title || po.vendors?.name || 'Cotización'}</p>
-                      <p className="text-xs text-slate-400">{po.vendors?.name} — ${Number(po.total_cost).toFixed(2)}</p>
+                      <p className="text-xs text-slate-400">
+                        {po.vendors?.name} — subtotal ${Number(po.subtotal ?? po.total_cost).toFixed(2)}
+                        {!!po.tax_amount && ` + impuesto $${Number(po.tax_amount).toFixed(2)}`} = ${Number(po.total_cost).toFixed(2)}
+                      </p>
                     </div>
                     <div className="flex items-center gap-2">
                       {statusBadge(po.status)}
@@ -564,7 +610,9 @@ export const FinancePortal: React.FC = () => {
                 <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
                   <tr>
                     <th className="px-4 py-3 font-semibold">PROVEEDOR</th>
-                    <th className="px-4 py-3 font-semibold text-right">MONTO</th>
+                    <th className="px-4 py-3 font-semibold text-right">SUBTOTAL</th>
+                    <th className="px-4 py-3 font-semibold text-right">IMPUESTO</th>
+                    <th className="px-4 py-3 font-semibold text-right">TOTAL</th>
                     <th className="px-4 py-3 font-semibold">ESTADO</th>
                   </tr>
                 </thead>
@@ -572,7 +620,9 @@ export const FinancePortal: React.FC = () => {
                   {purchaseOrders.map(po => (
                     <tr key={po.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-semibold">{po.vendors?.name || '—'}</td>
-                      <td className="px-4 py-3 text-right font-mono">${Number(po.total_cost).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-slate-500">${Number(po.subtotal ?? po.total_cost).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-slate-500">${Number(po.tax_amount || 0).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right font-mono font-bold">${Number(po.total_cost).toFixed(2)}</td>
                       <td className="px-4 py-3">{statusBadge(po.status)}</td>
                     </tr>
                   ))}

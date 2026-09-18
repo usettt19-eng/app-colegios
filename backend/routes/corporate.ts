@@ -78,15 +78,32 @@ router.get("/purchase-orders", async (req: Request, res: Response) => {
 // adjunta por quien solicita la compra/contratación de servicio.
 router.post("/purchase-orders", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, vendor_id, requested_by, total_cost, quote_file_url, quote_title } = req.body;
-    if (!tenant_id || !vendor_id || total_cost === undefined) {
-      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, vendor_id, total_cost)" });
+    const { tenant_id, vendor_id, requested_by, subtotal, tax_rate, total_cost, quote_file_url, quote_title } = req.body;
+    if (!tenant_id || !vendor_id || (subtotal === undefined && total_cost === undefined)) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, vendor_id, subtotal o total_cost)" });
+    }
+
+    // El impuesto (ej. ITBMS) se calcula sobre el subtotal, no se pide ya
+    // sumado, para poder reportarlo por separado en declaraciones fiscales.
+    let finalSubtotal: number, finalTaxRate: number, finalTaxAmount: number, finalTotal: number;
+    if (subtotal !== undefined) {
+      finalSubtotal = Number(subtotal);
+      finalTaxRate = tax_rate !== undefined ? Number(tax_rate) : 0;
+      finalTaxAmount = Number((finalSubtotal * (finalTaxRate / 100)).toFixed(2));
+      finalTotal = Number((finalSubtotal + finalTaxAmount).toFixed(2));
+    } else {
+      finalTotal = Number(total_cost);
+      finalSubtotal = finalTotal;
+      finalTaxRate = 0;
+      finalTaxAmount = 0;
     }
 
     const { data: purchaseOrder, error } = await supabaseAdmin
       .from("purchase_orders")
       .insert({
-        tenant_id, vendor_id, requested_by: requested_by || null, total_cost, status: "pending_approval",
+        tenant_id, vendor_id, requested_by: requested_by || null,
+        subtotal: finalSubtotal, tax_rate: finalTaxRate, tax_amount: finalTaxAmount, total_cost: finalTotal,
+        status: "pending_approval",
         quote_file_url: quote_file_url || null, quote_title: quote_title || null,
       })
       .select()
@@ -100,7 +117,7 @@ router.post("/purchase-orders", async (req: Request, res: Response) => {
     await supabaseAdmin.from("audit_logs").insert({
       tenant_id,
       event_type: "FINANCE",
-      description: `Se solicitó una orden de compra por $${total_cost} al proveedor (ID: ${vendor_id}).`,
+      description: `Se solicitó una orden de compra por $${finalTotal} (subtotal $${finalSubtotal} + impuesto $${finalTaxAmount}) al proveedor (ID: ${vendor_id}).`,
       actor_name: "Procurement System",
     });
 
@@ -205,7 +222,7 @@ router.post("/purchase-orders/:id/confirm-payment", async (req: Request, res: Re
 
     const { data: purchaseOrder, error } = await supabaseAdmin
       .from("purchase_orders")
-      .update({ status: "paid" })
+      .update({ status: "paid", paid_at: new Date().toISOString() })
       .eq("id", id)
       .select()
       .single();
@@ -257,14 +274,14 @@ router.get("/recurring-expenses", async (req: Request, res: Response) => {
 // Configura un gasto fijo mensual a un proveedor (ej. "Energía eléctrica" con ENSA)
 router.post("/recurring-expenses", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, vendor_id, concept, estimated_amount, due_day } = req.body;
+    const { tenant_id, vendor_id, concept, estimated_amount, due_day, tax_rate } = req.body;
     if (!tenant_id || !vendor_id || !concept || estimated_amount === undefined) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, vendor_id, concept, estimated_amount)" });
     }
 
     const { data: recurringExpense, error } = await supabaseAdmin
       .from("recurring_expenses")
-      .insert({ tenant_id, vendor_id, concept, estimated_amount, due_day: due_day || 5 })
+      .insert({ tenant_id, vendor_id, concept, estimated_amount, due_day: due_day || 5, tax_rate: tax_rate ?? 0 })
       .select()
       .single();
 
@@ -285,12 +302,13 @@ router.post("/recurring-expenses", async (req: Request, res: Response) => {
 router.patch("/recurring-expenses/:id", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { estimated_amount, due_day, is_active } = req.body;
+    const { estimated_amount, due_day, is_active, tax_rate } = req.body;
 
     const updates: Record<string, any> = {};
     if (estimated_amount !== undefined) updates.estimated_amount = estimated_amount;
     if (due_day !== undefined) updates.due_day = due_day;
     if (is_active !== undefined) updates.is_active = is_active;
+    if (tax_rate !== undefined) updates.tax_rate = tax_rate;
 
     const { data: recurringExpense, error } = await supabaseAdmin
       .from("recurring_expenses")
@@ -316,7 +334,7 @@ router.patch("/recurring-expenses/:id", async (req: Request, res: Response) => {
 router.post("/recurring-expenses/:id/generate", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { tenant_id, billing_period, amount, requested_by } = req.body;
+    const { tenant_id, billing_period, amount, tax_rate, requested_by } = req.body;
     if (!tenant_id || !billing_period) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, billing_period)" });
     }
@@ -329,13 +347,18 @@ router.post("/recurring-expenses/:id/generate", async (req: Request, res: Respon
 
     if (!recurringExpense) return res.status(404).json({ error: "Gasto recurrente no encontrado." });
 
+    const subtotal = amount !== undefined ? Number(amount) : Number(recurringExpense.estimated_amount);
+    const rate = tax_rate !== undefined ? Number(tax_rate) : Number(recurringExpense.tax_rate || 0);
+    const taxAmount = Number((subtotal * (rate / 100)).toFixed(2));
+    const total = Number((subtotal + taxAmount).toFixed(2));
+
     const { data: purchaseOrder, error } = await supabaseAdmin
       .from("purchase_orders")
       .insert({
         tenant_id,
         vendor_id: recurringExpense.vendor_id,
         requested_by: requested_by || null,
-        total_cost: amount !== undefined ? amount : recurringExpense.estimated_amount,
+        subtotal, tax_rate: rate, tax_amount: taxAmount, total_cost: total,
         status: "pending_approval",
         quote_title: `${recurringExpense.concept} - ${billing_period}`,
         recurring_expense_id: id,
@@ -355,7 +378,7 @@ router.post("/recurring-expenses/:id/generate", async (req: Request, res: Respon
     await supabaseAdmin.from("audit_logs").insert({
       tenant_id,
       event_type: "FINANCE",
-      description: `Se generó el cargo mensual de "${recurringExpense.concept}" (${billing_period}) por $${purchaseOrder.total_cost}.`,
+      description: `Se generó el cargo mensual de "${recurringExpense.concept}" (${billing_period}) por $${purchaseOrder.total_cost} (subtotal $${subtotal} + impuesto $${taxAmount}).`,
       actor_name: "Finance System",
     });
 
