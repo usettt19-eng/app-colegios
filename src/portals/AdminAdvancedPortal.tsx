@@ -64,6 +64,7 @@ interface Course {
   code: string;
   name: string;
   credits: number | null;
+  course_grade_levels?: { grade_level_id: string; grade_levels: { id: string; name: string } | null }[];
 }
 
 interface ClassGroup {
@@ -109,6 +110,9 @@ export const AdminAdvancedPortal: React.FC = () => {
 
   const [termForm, setTermForm] = useState({ name: '', start_date: '', end_date: '', is_active: false });
   const [courseForm, setCourseForm] = useState({ code: '', name: '', credits: '' });
+  const [courseGradeLevelIds, setCourseGradeLevelIds] = useState<string[]>([]);
+  const [generateGroupsForm, setGenerateGroupsForm] = useState<Record<string, { term_id: string; teacher_id: string }>>({});
+  const [generatingGroupsCourseId, setGeneratingGroupsCourseId] = useState<string | null>(null);
   const [classForm, setClassForm] = useState({ term_id: '', course_id: '', name: '', capacity: '30', teacher_id: '', grade_section_id: '' });
   const [classGradeLevelId, setClassGradeLevelId] = useState('');
   const [classTeacherReassign, setClassTeacherReassign] = useState<Record<string, string>>({});
@@ -579,12 +583,14 @@ export const AdminAdvancedPortal: React.FC = () => {
           code: courseForm.code,
           name: courseForm.name,
           credits: courseForm.credits ? Number(courseForm.credits) : null,
+          grade_level_ids: courseGradeLevelIds,
         }),
       });
       const data = await response.json();
       if (data.success) {
         setMessage('✅ Curso agregado al catálogo académico.');
         setCourseForm({ code: '', name: '', credits: '' });
+        setCourseGradeLevelIds([]);
         loadAll();
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo crear el curso.'));
@@ -593,6 +599,33 @@ export const AdminAdvancedPortal: React.FC = () => {
       setMessage('❌ Error de conexión.');
     }
     setLoading(false);
+  };
+
+  const handleGenerateGroups = async (courseId: string) => {
+    const form = generateGroupsForm[courseId];
+    if (!form?.term_id) {
+      setMessage('❌ Selecciona el año lectivo para generar los grupos.');
+      return;
+    }
+    setGeneratingGroupsCourseId(courseId);
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/academics/courses/${courseId}/generate-groups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, term_id: form.term_id, teacher_id: form.teacher_id || null }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ ' + data.message + (data.skipped.length > 0 ? ` (${data.skipped.length} ya existían).` : ''));
+        loadAll();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudieron generar los grupos.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setGeneratingGroupsCourseId(null);
   };
 
   const handleCreateClass = async () => {
@@ -863,6 +896,25 @@ export const AdminAdvancedPortal: React.FC = () => {
                 onChange={e => setCourseForm({ ...courseForm, credits: e.target.value })}
                 className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
               />
+              <div>
+                <p className="text-xs font-bold text-slate-500 mb-1.5">¿A qué grados aplica? (opcional, para "Generar Grupos" después)</p>
+                <div className="flex flex-wrap gap-2">
+                  {gradeLevels.map(g => {
+                    const checked = courseGradeLevelIds.includes(g.id);
+                    return (
+                      <button
+                        key={g.id}
+                        type="button"
+                        onClick={() => setCourseGradeLevelIds(checked ? courseGradeLevelIds.filter(id => id !== g.id) : [...courseGradeLevelIds, g.id])}
+                        className={`px-2.5 py-1 rounded-full text-xs font-bold border ${checked ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-500 border-slate-300 hover:bg-slate-50'}`}
+                      >
+                        {g.name}
+                      </button>
+                    );
+                  })}
+                  {gradeLevels.length === 0 && <span className="text-xs text-slate-400">Configura grados primero en "Grados y Secciones".</span>}
+                </div>
+              </div>
               <button
                 onClick={handleCreateCourse}
                 disabled={loading}
@@ -940,6 +992,60 @@ export const AdminAdvancedPortal: React.FC = () => {
                 Crear Grupo
               </button>
             </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50">
+              <h2 className="font-bold text-slate-700">Catálogo de Cursos</h2>
+            </div>
+            {courses.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay cursos en el catálogo.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {courses.map(c => {
+                  const assignedGrades = (c.course_grade_levels || []).map(m => m.grade_levels?.name).filter(Boolean);
+                  const form = generateGroupsForm[c.id] || { term_id: '', teacher_id: '' };
+                  return (
+                    <div key={c.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-slate-700">{c.code} — {c.name}</p>
+                        <p className="text-xs text-slate-500">
+                          {assignedGrades.length > 0 ? `Aplica a: ${assignedGrades.join(', ')}` : 'Sin grados asignados'}
+                        </p>
+                      </div>
+                      {assignedGrades.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select
+                            value={form.term_id}
+                            onChange={e => setGenerateGroupsForm({ ...generateGroupsForm, [c.id]: { ...form, term_id: e.target.value } })}
+                            className="border border-slate-300 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-rose-500"
+                          >
+                            <option value="">Año lectivo...</option>
+                            {terms.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
+                          <select
+                            value={form.teacher_id}
+                            onChange={e => setGenerateGroupsForm({ ...generateGroupsForm, [c.id]: { ...form, teacher_id: e.target.value } })}
+                            className="border border-slate-300 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-rose-500"
+                          >
+                            <option value="">Docente (opcional)</option>
+                            {staff.filter(s => s.role === 'teacher').map(t => <option key={t.id} value={t.id}>{t.first_name} {t.last_name}</option>)}
+                          </select>
+                          <button
+                            onClick={() => handleGenerateGroups(c.id)}
+                            disabled={generatingGroupsCourseId === c.id}
+                            className="flex items-center px-3 py-1.5 bg-rose-600 text-white rounded-md text-xs font-bold hover:bg-rose-700 disabled:opacity-50"
+                          >
+                            {generatingGroupsCourseId === c.id ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Users2 className="w-3.5 h-3.5 mr-1.5" />}
+                            Generar Grupos
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
