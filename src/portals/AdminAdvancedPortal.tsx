@@ -129,6 +129,27 @@ interface FeeSchedule {
   is_active: boolean;
 }
 
+interface StudentDiscount {
+  id: string;
+  student_id: string;
+  name: string;
+  discount_type: 'percent' | 'fixed';
+  value: number;
+  fee_concept: string | null;
+  is_active: boolean;
+  start_date: string | null;
+  end_date: string | null;
+  notes: string | null;
+  students: { first_name: string; last_name: string; grade: string | null } | null;
+}
+
+interface StudentSearchResult {
+  id: string;
+  first_name: string;
+  last_name: string;
+  grade: string | null;
+}
+
 export const AdminAdvancedPortal: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('terms');
   const [message, setMessage] = useState('');
@@ -171,6 +192,17 @@ export const AdminAdvancedPortal: React.FC = () => {
     grade: '', concept: '', description: '', amount: '', recurrence: 'unico' as FeeSchedule['recurrence'], due_day: '5', accounting_code: '',
   });
   const [feeSchedulesLoading, setFeeSchedulesLoading] = useState(false);
+
+  // --- Becas, Descuentos y Convenios ---
+  const [studentDiscounts, setStudentDiscounts] = useState<StudentDiscount[]>([]);
+  const [discountsLoading, setDiscountsLoading] = useState(false);
+  const [discountStudentSearch, setDiscountStudentSearch] = useState('');
+  const [discountStudentSuggestions, setDiscountStudentSuggestions] = useState<StudentSearchResult[]>([]);
+  const [selectedDiscountStudent, setSelectedDiscountStudent] = useState<StudentSearchResult | null>(null);
+  const [discountForm, setDiscountForm] = useState({
+    name: '', discount_type: 'percent' as 'percent' | 'fixed', value: '', fee_concept: '', notes: '',
+  });
+  const [creatingDiscount, setCreatingDiscount] = useState(false);
 
   // --- Organización (departamentos, jerarquía, puertas de salida) ---
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -447,7 +479,7 @@ export const AdminAdvancedPortal: React.FC = () => {
   useEffect(() => {
     if (activeTab === 'organization') loadOrganization();
     if (activeTab === 'audit') loadAudit();
-    if (activeTab === 'costs') { loadFeeSchedules(); loadGradeLevels(); }
+    if (activeTab === 'costs') { loadFeeSchedules(); loadGradeLevels(); loadStudentDiscounts(); }
     if (activeTab === 'grades_settings') loadGradeLevels();
   }, [activeTab]);
 
@@ -497,6 +529,103 @@ export const AdminAdvancedPortal: React.FC = () => {
         setFeeSchedules(prev => prev.filter(fs => fs.id !== id));
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo eliminar el cargo.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
+  const loadStudentDiscounts = async () => {
+    setDiscountsLoading(true);
+    try {
+      const response = await fetch(`/api/v1/finance/student-discounts?tenant_id=${DEMO_TENANT_ID}`);
+      const data = await response.json();
+      setStudentDiscounts(data.discounts || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+    setDiscountsLoading(false);
+  };
+
+  useEffect(() => {
+    if (!discountStudentSearch || selectedDiscountStudent) {
+      setDiscountStudentSuggestions([]);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      fetch(`/api/v1/students?tenant_id=${DEMO_TENANT_ID}&search=${encodeURIComponent(discountStudentSearch)}`)
+        .then(r => r.json())
+        .then(d => setDiscountStudentSuggestions(d.students || []))
+        .catch(() => {});
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [discountStudentSearch, selectedDiscountStudent]);
+
+  const handleCreateDiscount = async () => {
+    if (!selectedDiscountStudent || !discountForm.name || !discountForm.value) {
+      setMessage('❌ Selecciona el alumno, el nombre y el valor de la beca/descuento.');
+      return;
+    }
+    setCreatingDiscount(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/finance/student-discounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          student_id: selectedDiscountStudent.id,
+          name: discountForm.name,
+          discount_type: discountForm.discount_type,
+          value: Number(discountForm.value),
+          fee_concept: discountForm.fee_concept || null,
+          notes: discountForm.notes || null,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage(`✅ "${discountForm.name}" asignado a ${selectedDiscountStudent.first_name} ${selectedDiscountStudent.last_name}.`);
+        setDiscountForm({ name: '', discount_type: 'percent', value: '', fee_concept: '', notes: '' });
+        setSelectedDiscountStudent(null);
+        setDiscountStudentSearch('');
+        loadStudentDiscounts();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo asignar la beca/descuento.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setCreatingDiscount(false);
+  };
+
+  const handleToggleDiscountActive = async (discount: StudentDiscount) => {
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/finance/student-discounts/${discount.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !discount.is_active }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        loadStudentDiscounts();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo actualizar.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
+  const handleDeleteDiscount = async (id: string) => {
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/finance/student-discounts/${id}`, { method: 'DELETE' });
+      const data = await response.json();
+      if (data.success) {
+        setStudentDiscounts(prev => prev.filter(d => d.id !== id));
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo eliminar.'));
       }
     } catch {
       setMessage('❌ Error de conexión.');
@@ -1790,6 +1919,133 @@ export const AdminAdvancedPortal: React.FC = () => {
               </div>
             );
           })()}
+
+          {/* Becas, Descuentos y Convenios */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <div>
+              <h2 className="font-bold text-slate-700 flex items-center"><Plus className="w-4 h-4 mr-2 text-rose-600" /> Asignar Beca / Descuento</h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Ej. "Beca Deportiva" 50%, o "Descuento Segundo Hermano" 10%. El generador mensual de facturas (Portal de Finanzas → Cotizaciones/Programar) lo aplica automáticamente.
+                Si dejas el concepto vacío, el descuento aplica a TODOS los cargos del alumno; si indicas un concepto (ej. "Colegiatura"), solo aplica a ese cargo.
+              </p>
+            </div>
+
+            <div className="relative">
+              {selectedDiscountStudent ? (
+                <div className="flex items-center justify-between bg-slate-50 rounded-md border border-rose-200 px-3 py-2">
+                  <span className="text-sm font-semibold text-slate-700">
+                    {selectedDiscountStudent.first_name} {selectedDiscountStudent.last_name} {selectedDiscountStudent.grade ? `(${selectedDiscountStudent.grade})` : ''}
+                  </span>
+                  <button onClick={() => setSelectedDiscountStudent(null)} className="text-xs font-bold text-rose-600 hover:text-rose-800">Cambiar</button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text" placeholder="Buscar alumno por nombre..." value={discountStudentSearch}
+                    onChange={e => setDiscountStudentSearch(e.target.value)}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                  {discountStudentSuggestions.length > 0 && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                      {discountStudentSuggestions.map(s => (
+                        <button
+                          key={s.id}
+                          onClick={() => { setSelectedDiscountStudent(s); setDiscountStudentSearch(''); setDiscountStudentSuggestions([]); }}
+                          className="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50"
+                        >
+                          {s.first_name} {s.last_name} {s.grade ? <span className="text-slate-400">({s.grade})</span> : null}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input
+                type="text" placeholder="Nombre (ej. Beca Deportiva)" value={discountForm.name}
+                onChange={e => setDiscountForm({ ...discountForm, name: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <input
+                type="text" placeholder="Concepto específico (opcional, ej. Colegiatura)" value={discountForm.fee_concept}
+                onChange={e => setDiscountForm({ ...discountForm, fee_concept: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <select
+                value={discountForm.discount_type}
+                onChange={e => setDiscountForm({ ...discountForm, discount_type: e.target.value as 'percent' | 'fixed' })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              >
+                <option value="percent">% de descuento</option>
+                <option value="fixed">Monto fijo (USD)</option>
+              </select>
+              <input
+                type="number" placeholder={discountForm.discount_type === 'percent' ? 'Ej. 50 (=50%)' : 'Ej. 25.00 (USD)'} value={discountForm.value}
+                onChange={e => setDiscountForm({ ...discountForm, value: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+            <input
+              type="text" placeholder="Notas (opcional)" value={discountForm.notes}
+              onChange={e => setDiscountForm({ ...discountForm, notes: e.target.value })}
+              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+            />
+            <button
+              onClick={handleCreateDiscount}
+              disabled={creatingDiscount}
+              className="flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50 font-semibold text-sm"
+            >
+              {creatingDiscount ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+              Asignar
+            </button>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 bg-slate-50 border-b border-slate-100">
+              <h2 className="font-bold text-slate-700">Becas y Descuentos Asignados</h2>
+            </div>
+            {discountsLoading ? (
+              <div className="flex items-center justify-center py-12 text-slate-400">
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Cargando becas y descuentos...
+              </div>
+            ) : studentDiscounts.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay becas ni descuentos asignados.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {studentDiscounts.map(d => (
+                  <div key={d.id} className="p-4 flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <p className="font-semibold text-slate-700 text-sm">
+                        {d.students ? `${d.students.first_name} ${d.students.last_name}` : 'Alumno'} — {d.name}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        {d.discount_type === 'percent' ? `${d.value}%` : `$${Number(d.value).toFixed(2)}`}
+                        {d.fee_concept ? ` sobre "${d.fee_concept}"` : ' sobre todos los cargos'}
+                        {d.notes ? ` · ${d.notes}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleToggleDiscountActive(d)}
+                        className={`px-2 py-1 rounded-full text-xs font-bold ${d.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}
+                      >
+                        {d.is_active ? 'Activo' : 'Inactivo'}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteDiscount(d.id)}
+                        className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 p-1 rounded"
+                        title="Eliminar"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

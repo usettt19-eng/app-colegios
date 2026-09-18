@@ -102,6 +102,128 @@ router.delete("/fee-schedules/:id", async (req: Request, res: Response) => {
   }
 });
 
+// ==========================================
+// BECAS, DESCUENTOS Y CONVENIOS
+// ==========================================
+
+// GET /api/v1/finance/student-discounts?tenant_id=...
+// Lista todas las becas/descuentos asignados en el colegio (para el
+// listado en Admin > Costos > Becas y Descuentos)
+router.get("/student-discounts", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    const { data, error } = await supabaseAdmin
+      .from("student_discounts")
+      .select("*, students(first_name, last_name, grade)")
+      .eq("tenant_id", tenant_id)
+      .order("created_at", { ascending: false });
+
+    if (error) return res.status(500).json({ error: "Error al consultar becas y descuentos." });
+    return res.status(200).json({ success: true, discounts: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/finance/student-discounts:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/finance/student-discounts
+// Asigna una beca/descuento a un alumno (ej. "Beca Deportiva 50%",
+// "Descuento Segundo Hermano 10%"). fee_concept es opcional: si se deja
+// vacío, el descuento aplica a TODOS los cargos del alumno; si se indica
+// (ej. "Colegiatura"), solo aplica a los cargos con ese concepto exacto.
+router.post("/student-discounts", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, student_id, name, discount_type, value, fee_concept, start_date, end_date, notes, created_by } = req.body;
+
+    if (!tenant_id || !student_id || !name || !discount_type || value === undefined) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, student_id, name, discount_type, value)" });
+    }
+    if (!["percent", "fixed"].includes(discount_type)) {
+      return res.status(400).json({ error: "discount_type debe ser 'percent' o 'fixed'." });
+    }
+    if (discount_type === "percent" && (Number(value) <= 0 || Number(value) > 100)) {
+      return res.status(400).json({ error: "Un descuento porcentual debe estar entre 0 y 100." });
+    }
+
+    const { data: discount, error } = await supabaseAdmin
+      .from("student_discounts")
+      .insert({
+        tenant_id, student_id, name, discount_type, value: Number(value),
+        fee_concept: fee_concept || null, start_date: start_date || null, end_date: end_date || null,
+        notes: notes || null, created_by: created_by || null,
+      })
+      .select("*, students(first_name, last_name, grade)")
+      .single();
+
+    if (error || !discount) {
+      console.error("Error al crear beca/descuento:", error);
+      return res.status(500).json({ error: "No se pudo registrar la beca/descuento." });
+    }
+
+    await supabaseAdmin.from("audit_logs").insert({
+      tenant_id,
+      event_type: "FINANCE",
+      description: `Se asignó "${name}" (${discount_type === "percent" ? value + "%" : "$" + value}) al alumno (ID: ${student_id}).`,
+      actor_name: "Finance System",
+    });
+
+    return res.status(201).json({ success: true, message: "Beca/descuento asignado.", discount });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/finance/student-discounts:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// PATCH /api/v1/finance/student-discounts/:id
+// Activa/desactiva o edita una beca/descuento ya asignado (sin borrar el
+// historial: desactivar es preferible a eliminar para conservar el
+// registro de qué facturas pasadas la aplicaron)
+router.patch("/student-discounts/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, discount_type, value, fee_concept, is_active, start_date, end_date, notes } = req.body;
+
+    const updates: Record<string, any> = {};
+    if (name !== undefined) updates.name = name;
+    if (discount_type !== undefined) updates.discount_type = discount_type;
+    if (value !== undefined) updates.value = Number(value);
+    if (fee_concept !== undefined) updates.fee_concept = fee_concept || null;
+    if (is_active !== undefined) updates.is_active = is_active;
+    if (start_date !== undefined) updates.start_date = start_date || null;
+    if (end_date !== undefined) updates.end_date = end_date || null;
+    if (notes !== undefined) updates.notes = notes;
+
+    const { data: discount, error } = await supabaseAdmin
+      .from("student_discounts")
+      .update(updates)
+      .eq("id", id)
+      .select("*, students(first_name, last_name, grade)")
+      .single();
+
+    if (error || !discount) return res.status(404).json({ error: "Beca/descuento no encontrado." });
+
+    return res.status(200).json({ success: true, message: "Beca/descuento actualizado.", discount });
+  } catch (error: any) {
+    console.error("Error en PATCH /api/v1/finance/student-discounts/:id:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// DELETE /api/v1/finance/student-discounts/:id
+router.delete("/student-discounts/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabaseAdmin.from("student_discounts").delete().eq("id", id);
+    if (error) return res.status(500).json({ error: "No se pudo eliminar la beca/descuento." });
+    return res.status(200).json({ success: true, message: "Beca/descuento eliminado." });
+  } catch (error: any) {
+    console.error("Error en DELETE /api/v1/finance/student-discounts/:id:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // POST /api/v1/finance/generate-invoices
 // Genera las facturas del periodo (ej. "2026-09") a partir de la tabla de
 // cargos activa: por cada cargo, busca los alumnos matriculados en ese
@@ -124,6 +246,49 @@ router.post("/generate-invoices", async (req: Request, res: Response) => {
     if (!feeSchedules || feeSchedules.length === 0) {
       return res.status(200).json({ success: true, message: "No hay cargos activos configurados.", invoicesCreated: 0 });
     }
+
+    // Becas/descuentos activos del colegio, para no consultarlos alumno por
+    // alumno dentro del loop. Un descuento aplica a un cargo si fee_concept
+    // es null (aplica a todo) o coincide exacto con el concepto del cargo, y
+    // si billing_period cae dentro de su vigencia (start_date/end_date, si
+    // se definieron).
+    const { data: allDiscounts } = await supabaseAdmin
+      .from("student_discounts")
+      .select("*")
+      .eq("tenant_id", tenant_id)
+      .eq("is_active", true);
+
+    const periodDate = `${billing_period}-01`;
+    const discountsByStudent = new Map<string, typeof allDiscounts>();
+    for (const d of allDiscounts || []) {
+      if (d.start_date && periodDate < d.start_date) continue;
+      if (d.end_date && periodDate > d.end_date) continue;
+      if (!discountsByStudent.has(d.student_id)) discountsByStudent.set(d.student_id, []);
+      discountsByStudent.get(d.student_id)!.push(d);
+    }
+
+    // Aplica los descuentos vigentes de un alumno a un cargo específico:
+    // primero se suman los % (capados a 100%) y se aplican sobre el monto
+    // original, luego se restan los montos fijos, sin bajar de $0.
+    const applyDiscounts = (studentId: string, fee: typeof feeSchedules[number]) => {
+      const studentDiscounts = (discountsByStudent.get(studentId) || []).filter(
+        d => !d.fee_concept || d.fee_concept.toLowerCase() === fee.concept.toLowerCase()
+      );
+      if (studentDiscounts.length === 0) return { finalAmount: Number(fee.amount), discountAmount: 0, labels: [] as string[] };
+
+      const percentTotal = Math.min(
+        100,
+        studentDiscounts.filter(d => d.discount_type === "percent").reduce((sum, d) => sum + Number(d.value), 0)
+      );
+      const fixedTotal = studentDiscounts.filter(d => d.discount_type === "fixed").reduce((sum, d) => sum + Number(d.value), 0);
+
+      const afterPercent = Number(fee.amount) * (1 - percentTotal / 100);
+      const finalAmount = Math.max(0, Number((afterPercent - fixedTotal).toFixed(2)));
+      const discountAmount = Number((Number(fee.amount) - finalAmount).toFixed(2));
+      const labels = studentDiscounts.map(d => `${d.name} (${d.discount_type === "percent" ? d.value + "%" : "$" + d.value})`);
+
+      return { finalAmount, discountAmount, labels };
+    };
 
     let invoicesCreated = 0;
     const skipped: string[] = [];
@@ -149,6 +314,7 @@ router.post("/generate-invoices", async (req: Request, res: Response) => {
           .maybeSingle();
 
         const invoiceNumber = `FAC-${billing_period}-${Math.floor(10000 + Math.random() * 90000)}`;
+        const { finalAmount, discountAmount, labels } = applyDiscounts(student.id, fee);
 
         const { data: invoice, error: invError } = await supabaseAdmin
           .from("invoices")
@@ -157,7 +323,9 @@ router.post("/generate-invoices", async (req: Request, res: Response) => {
             student_id: student.id,
             parent_id: guardian?.parent_id || null,
             invoice_number: invoiceNumber,
-            amount: fee.amount,
+            amount: finalAmount,
+            original_amount: Number(fee.amount),
+            discount_amount: discountAmount,
             currency: fee.currency,
             due_date,
             status: "open",
@@ -180,6 +348,16 @@ router.post("/generate-invoices", async (req: Request, res: Response) => {
           unit_price: fee.amount,
           accounting_code: fee.accounting_code,
         });
+
+        if (discountAmount > 0) {
+          await supabaseAdmin.from("invoice_line_items").insert({
+            invoice_id: invoice.id,
+            description: `Descuento: ${labels.join(", ")}`,
+            quantity: 1,
+            unit_price: -discountAmount,
+            accounting_code: fee.accounting_code,
+          });
+        }
 
         invoicesCreated++;
       }

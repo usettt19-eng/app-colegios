@@ -2,7 +2,7 @@
 
 > Documento vivo. Actualízalo cada vez que se cierre o se abra una tarea importante.
 > Regla operativa: cada vez que Claude avance en algo, actualiza este archivo en el mismo commit. Para retomar contexto del proyecto, leer este archivo primero — no releer toda la sesión.
-> Última actualización: 2026-09-18 (CRM de Admisiones — Pipeline de Prospectos)
+> Última actualización: 2026-09-18 (Becas, Descuentos y Convenios)
 
 ## 1. Qué es esto
 
@@ -113,9 +113,16 @@ Cada tabla tiene `tenant_id` (modelo multi-tenant). El repo vive en GitHub, rama
   - Verificado: FKs de `admission_prospects` (`assigned_to→profiles`, `converted_student_id→students`, `desired_grade_level_id→grade_levels`) sin ambigüedad vía `pg_constraint`; insert/delete de prueba contra producción confirmó que la tabla y el enum de etapas funcionan; typecheck limpio; Portal de Admisiones sirve HTTP 200 en local tras los cambios.
   - **Fuera de alcance a propósito** (quedan en el roadmap §5.1 "Avanzado" sin tocar): examen de admisión en línea (hoy `exam_score` se digita a mano tras un examen presencial) y firma electrónica de contratos (la firma de contrato de matrícula, `contracts.ts`, ya existe desde antes y sigue igual).
 
+- **Becas, Descuentos y Convenios** (segundo ítem "Core" del roadmap grande §5.1): motor de reglas para que el generador mensual de facturas (`POST /api/v1/finance/generate-invoices`) aplique automáticamente descuentos por alumno, en vez de que Colecturía tenga que editar el monto a mano cada mes.
+  - Nueva tabla `student_discounts` (migración `student_discounts_scholarships`): por alumno, `name` (ej. "Beca Deportiva", "Descuento Segundo Hermano"), `discount_type` (`percent` 0-100 | `fixed` monto USD), `fee_concept` opcional (si se deja vacío aplica a TODOS los cargos del alumno; si se indica, ej. "Colegiatura", solo a ese concepto exacto), vigencia opcional (`start_date`/`end_date`), `is_active` (desactivar en vez de borrar conserva el historial), `notes`. `invoices` ganó `original_amount` (el monto sin descontar) y `discount_amount` — **decisión de diseño**: `invoices.amount` se sigue guardando como el monto FINAL ya descontado (no el monto de lista), para no tener que tocar ningún otro módulo que ya lee `invoices.amount` como "lo que debe el padre" (dashboard de balance, Flujo Financiero, pagos, Expediente del Alumno).
+  - Backend: `GET/POST/PATCH/DELETE /api/v1/finance/student-discounts` (CRUD completo). `generate-invoices` ahora, por cada cargo+alumno, busca los descuentos activos y vigentes para ese `billing_period`, suma los % (capados a 100%) y los aplica sobre el monto, luego resta los montos fijos (sin bajar de $0), y guarda el resultado. Si el alumno tiene ≥1 descuento activo en ese cargo, se agrega una segunda línea en `invoice_line_items` con el detalle (ej. "Descuento: Beca Deportiva (50%)") como monto negativo — reutiliza el mismo mecanismo de desglose que ya existía para impuestos, sin necesidad de una tabla o UI nueva para mostrarlo.
+  - Frontend: nueva sección "Becas, Descuentos y Convenios" dentro de Admin → Costos (mismo tab donde se gestiona la tabla de cargos): buscador de alumno (mismo patrón de autocompletar que el resto del Admin), formulario para asignar (nombre, tipo, valor, concepto opcional, notas), listado de becas/descuentos asignados con badge Activo/Inactivo (toggle) y eliminar.
+  - Verificado: FKs de `student_discounts` sin ambigüedad vía `pg_constraint`; insert/select/delete de prueba contra producción; typecheck limpio; Portal Admin sirve HTTP 200 en local tras los cambios.
+  - **Fuera de alcance a propósito** (queda en el roadmap §5.1): Notas de Crédito y Anulaciones (cancelar una factura ya emitida por error) es un flujo contable distinto — no se tocó `invoices.status` más allá de lo que ya existía.
+
 ## 4. Tarea en curso
 
-Ninguna en este momento. El usuario pidió continuar "todo poco a poco, uno detrás de otro" con los ítems "Core" del roadmap grande (§5.1); el CRM de Admisiones (ver arriba) fue el primero. Backlog técnico interno (§5.2) ya resuelto en lo que no estaba bloqueado.
+Ninguna en este momento. El usuario pidió continuar "todo poco a poco, uno detrás de otro" con los ítems "Core" del roadmap grande (§5.1); CRM de Admisiones y Becas/Descuentos (ver arriba) son los primeros dos. Backlog técnico interno (§5.2) ya resuelto en lo que no estaba bloqueado.
 
 Tarea completada justo antes: personal expatriado/honorarios profesionales + primera versión (sin desglose) del acumulado mensual de nómina.
 
@@ -159,7 +166,7 @@ El usuario está pegando, sección por sección, una lista de posibles mejoras p
 
 **Finanzas, Compras y Contabilidad**
 - Core:
-  - Gestión de Becas, Descuentos y Convenios: motor de reglas (ej. "10% por segundo hermano", "Beca Deportiva 50%") aplicado automáticamente por el generador mensual de facturas.
+  - ~~Gestión de Becas, Descuentos y Convenios~~ **RESUELTO** — ver sección 3/4.
   - Notas de Crédito y Anulaciones: flujo contable legal para cancelar facturas emitidas por error.
 - Avanzado (diferenciadores):
   - Integración Bancaria (reconciliación automática): subir extracto bancario CSV/Excel y hacer match automático depósito↔factura por número de referencia.
