@@ -104,6 +104,31 @@ El usuario también dejó anotado (no pidió construirlo todavía, solo avisó q
 
 ## 5. Backlog conocido (no urgente, no iniciado)
 
+### 5.1 Roadmap sugerido por el usuario (lista larga en evaluación, NO iniciado — solo anotado a pedido explícito del usuario mientras decide prioridades)
+
+El usuario está pegando, sección por sección, una lista de posibles mejoras para acercar la plataforma a un SIS/ERP de clase mundial (tipo ManageBac/PowerSchool/Alexia). Se agregan aquí tal cual van llegando, sin construir nada, hasta que el usuario diga cuáles quiere y en qué orden.
+
+**Gestión Académica y Aprendizaje**
+- Core:
+  - Asistencia Estudiantil por materia y por día (no solo diaria general), con notificación automática al padre si el alumno no llega a la primera hora. *Nota: ya existe un módulo de asistencia diaria con alertas por 3 faltas consecutivas (ver Portal Docente); esto pediría granularidad por materia/bloque, no solo por día.*
+  - Módulo de Disciplina y Méritos: registro de incidencias (positivas y negativas), puntos de conducta reflejados en el boletín.
+  - Gestión de Exámenes Finales y Recuperaciones: flujo para alumnos reprobados (supletorios, mesas de examen, actas de calificación independientes).
+- Avanzado (diferenciadores):
+  - Integración con LMS/Aulas Virtuales (Google Classroom / Microsoft Teams) vía API: crear automáticamente el aula virtual al crear un "Grupo" en el ERP, con los alumnos ya matriculados.
+  - Rúbricas de Evaluación: calificar con una matriz (Presentación, Contenido, Ortografía, etc.) en vez de un solo número, y que el sistema calcule la nota. *Se conectaría naturalmente con el Plan de Evaluación ya construido (ver sección 3).*
+  - Analítica Predictiva (Alerta Temprana): dashboard para coordinación académica que cruce asistencia + disciplina + notas bajas para predecir riesgo de reprobar/desertar.
+
+**Admisiones y Marketing (CRM Escolar)**
+- Core:
+  - Seguimiento de Prospectos (CRM tipo Trello/Kanban): Admisiones empezaría desde que un padre pregunta por información, no desde la matrícula. Pipeline: Interesado → Visita agendada → Examen de admisión → Matriculado.
+- Avanzado (diferenciadores):
+  - Exámenes de Admisión en Línea: prueba diagnóstica básica que el prospecto rinde directamente en el portal antes de ser aceptado.
+  - Firma Electrónica de Contratos: integración con DocuSign (o firma interna) para el "Contrato de Servicios Educativos" anual, sin papel en la matrícula.
+
+*(Pendiente de que el usuario siga pegando el resto de las secciones — se irán agregando aquí en el mismo formato antes de decidir qué se construye.)*
+
+### 5.2 Backlog técnico interno
+
 - **RBAC granular por sección de portal para el staff** (mencionado por el usuario, no iniciado): hoy solo existe `profiles.role` (admin/teacher/guard/parent/super_admin) sin permisos finos dentro de cada portal — cualquier admin ve/edita todo el Admin/ERP/Finanzas. Probablemente requiera: tabla de permisos (por rol o por perfil individual, quizá ligada a `departments`), middleware de autorización por sección, y UI en Admin para asignar permisos. Bloqueado en la práctica por que la mayoría de portales (Admin, ERP, Finanzas, Admisiones) todavía no tienen Fase 2 auth real — probablemente haya que resolver eso primero o en paralelo.
 - Migrar Admisiones, Portal Corporativo, Portal de Finanzas y Portal Admin (aparte de Super Admin) a auth real (Fase 2).
 - Integración saliente con SafeSmartPickup (pendiente de credenciales de API del usuario).
