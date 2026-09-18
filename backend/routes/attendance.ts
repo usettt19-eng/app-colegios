@@ -90,6 +90,59 @@ router.post("/record", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/v1/attendance/history/:student_id
+// Historial completo de asistencia de un alumno (para el Expediente del
+// Alumno del lado del colegio), con un resumen de faltas/tardanzas.
+router.get("/history/:student_id", async (req: Request, res: Response) => {
+  try {
+    const { student_id } = req.params;
+
+    const { data, error } = await supabaseAdmin
+      .from("attendance_records")
+      .select("id, date, status, notes, class_id, classes(name, courses(name))")
+      .eq("student_id", student_id)
+      .order("date", { ascending: false });
+
+    if (error) return res.status(500).json({ error: "Error al consultar el historial de asistencia." });
+
+    const records = data || [];
+    const summary = {
+      present: records.filter(r => r.status === "present").length,
+      absent: records.filter(r => r.status === "absent").length,
+      late: records.filter(r => r.status === "late").length,
+      excused: records.filter(r => r.status === "excused").length,
+    };
+
+    return res.status(200).json({ success: true, records, summary });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/attendance/history/:student_id:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// GET /api/v1/attendance/alerts-history/:student_id
+// Historial COMPLETO de alertas (resueltas y pendientes) de un alumno, para
+// el Expediente del Alumno. El endpoint /alert/:student_id existente solo
+// devuelve las pendientes (uso operativo del día a día).
+router.get("/alerts-history/:student_id", async (req: Request, res: Response) => {
+  try {
+    const { student_id } = req.params;
+
+    const { data, error } = await supabaseAdmin
+      .from("student_alerts")
+      .select("*")
+      .eq("student_id", student_id)
+      .order("created_at", { ascending: false });
+
+    if (error) return res.status(500).json({ error: "Error de consulta" });
+
+    return res.status(200).json({ success: true, alerts: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/attendance/alerts-history/:student_id:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // GET /api/v1/attendance/alert/:student_id
 // Consulta si un alumno tiene alertas de deserción pendientes
 router.get("/alert/:student_id", async (req: Request, res: Response) => {

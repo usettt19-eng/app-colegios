@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Search, Users2, UserPlus, Link2, X, ChevronDown, ChevronUp, Loader2, CheckCircle, Plus } from 'lucide-react';
+import { Search, Users2, UserPlus, Link2, X, ChevronDown, ChevronUp, Loader2, CheckCircle, Plus, FolderOpen } from 'lucide-react';
+import { StudentFile } from './StudentFile';
 
 interface Guardian {
   relationship: string;
@@ -48,6 +49,7 @@ export const StudentDirectory: React.FC<Props> = ({ tenantId }) => {
   const [search, setSearch] = useState('');
   const [message, setMessage] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [fileStudentId, setFileStudentId] = useState<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   const [parentSearch, setParentSearch] = useState('');
@@ -521,6 +523,13 @@ export const StudentDirectory: React.FC<Props> = ({ tenantId }) => {
                           ))
                         )}
                       </div>
+                      <span
+                        role="button"
+                        onClick={e => { e.stopPropagation(); setFileStudentId(student.id); }}
+                        className="flex items-center px-2 py-1 rounded-md text-xs font-bold bg-rose-50 text-rose-600 hover:bg-rose-100"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5 mr-1" /> Expediente
+                      </span>
                       {isExpanded ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
                     </div>
                   </button>
@@ -641,6 +650,8 @@ export const StudentDirectory: React.FC<Props> = ({ tenantId }) => {
           </div>
         )}
       </div>
+
+      {fileStudentId && <StudentFile studentId={fileStudentId} onClose={() => setFileStudentId(null)} />}
     </div>
   );
 };

@@ -408,4 +408,84 @@ router.get("/:id/dashboard", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/v1/students/:id/full-record
+// Expediente consolidado del alumno para el lado del colegio (Admin): junta
+// en una sola llamada todo lo que hoy vive repartido en varios módulos —
+// datos generales/admisión/salud (students), responsables, historial
+// académico multi-año con notas finales por clase (enrollments), boletines
+// publicados, documentos, asistencia + alertas, y cobros/pagos. No duplica
+// la lógica de cálculo de esos módulos: son las mismas consultas que ya usan
+// sus propios endpoints, corridas en paralelo.
+router.get("/:id/full-record", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const [
+      studentRes,
+      guardiansRes,
+      enrollmentsRes,
+      reportCardsRes,
+      documentsRes,
+      attendanceRes,
+      alertsRes,
+      invoicesRes,
+    ] = await Promise.all([
+      supabaseAdmin.from("students").select("*").eq("id", id).single(),
+      supabaseAdmin.from("parent_students").select("relationship, profiles(id, first_name, last_name, email, phone, role)").eq("student_id", id),
+      supabaseAdmin
+        .from("enrollments")
+        .select("*, academic_terms(name, start_date, end_date), class_enrollments(final_grade, classes(name, courses(name)))")
+        .eq("student_id", id)
+        .order("enrollment_date", { ascending: false }),
+      supabaseAdmin
+        .from("report_cards")
+        .select("*, academic_terms(name), report_card_details(final_score, classes(name))")
+        .eq("student_id", id)
+        .eq("is_published", true)
+        .order("published_at", { ascending: false }),
+      supabaseAdmin.from("student_documents").select("*").eq("student_id", id).order("created_at", { ascending: false }),
+      supabaseAdmin
+        .from("attendance_records")
+        .select("id, date, status, notes, class_id, classes(name, courses(name))")
+        .eq("student_id", id)
+        .order("date", { ascending: false }),
+      supabaseAdmin.from("student_alerts").select("*").eq("student_id", id).order("created_at", { ascending: false }),
+      supabaseAdmin.from("invoices").select("*, invoice_line_items(description, quantity, unit_price, discount)").eq("student_id", id).order("due_date", { ascending: false }),
+    ]);
+
+    if (studentRes.error || !studentRes.data) return res.status(404).json({ error: "Alumno no encontrado." });
+
+    const invoiceIds = (invoicesRes.data || []).map((inv: any) => inv.id);
+    const paymentsRes = invoiceIds.length > 0
+      ? await supabaseAdmin.from("payments").select("*, invoices(invoice_number)").in("invoice_id", invoiceIds).order("payment_date", { ascending: false })
+      : { data: [] as any[] };
+
+    const attendanceRecords = attendanceRes.data || [];
+    const attendanceSummary = {
+      present: attendanceRecords.filter((r: any) => r.status === "present").length,
+      absent: attendanceRecords.filter((r: any) => r.status === "absent").length,
+      late: attendanceRecords.filter((r: any) => r.status === "late").length,
+      excused: attendanceRecords.filter((r: any) => r.status === "excused").length,
+    };
+
+    return res.status(200).json({
+      success: true,
+      record: {
+        student: studentRes.data,
+        guardians: guardiansRes.data || [],
+        academicHistory: enrollmentsRes.data || [],
+        reportCards: reportCardsRes.data || [],
+        documents: documentsRes.data || [],
+        attendance: { records: attendanceRecords, summary: attendanceSummary },
+        alerts: alertsRes.data || [],
+        invoices: invoicesRes.data || [],
+        payments: paymentsRes.data || [],
+      },
+    });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/students/:id/full-record:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 export default router;

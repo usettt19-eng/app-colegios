@@ -2,7 +2,7 @@
 
 > Documento vivo. Actualízalo cada vez que se cierre o se abra una tarea importante.
 > Regla operativa: cada vez que Claude avance en algo, actualiza este archivo en el mismo commit. Para retomar contexto del proyecto, leer este archivo primero — no releer toda la sesión.
-> Última actualización: 2026-09-18 (escala de notas / períodos de evaluación / plan de evaluación)
+> Última actualización: 2026-09-18 (Expediente del Alumno consolidado, lado colegio)
 
 ## 1. Qué es esto
 
@@ -90,9 +90,16 @@ Cada tabla tiene `tenant_id` (modelo multi-tenant). El repo vive en GitHub, rama
   - Migración: `grading_scale_periods_evaluation_plan` (aplicada y verificada contra producción — FKs de los nuevos embeds revisados vía `pg_constraint` antes de escribir las queries, mismo cuidado de siempre por el bug de PostgREST 300).
   - Frontend: `AdminAdvancedPortal.tsx` (escala de notas + gestor de períodos, bajo "Años Lectivos") y `TeacherPortal.tsx` (nueva pestaña "Plan de Evaluación": pesos por categoría, selector de período + botón calcular con resultados por alumno, botón consolidar nota final). Typecheck limpio en ambos.
 
+- **Expediente del Alumno consolidado (lado colegio)**: el usuario preguntó si desde el colegio se puede ver TODO lo del alumno en un solo lugar — lo que llena el padre desde su portal, lo de admisión, lo que generan los docentes (notas/boletines) a lo largo de todos los años, y lo de cobros/pagos. No existía ninguna vista así (solo el Directorio de Alumnos, que apenas muestra guardianes). Se construyó:
+  - Nuevo endpoint agregador `GET /api/v1/students/:id/full-record` (`backend/routes/students.ts`) que corre en paralelo (no duplica lógica, son las mismas consultas que ya usan sus propios endpoints) y devuelve: datos generales + admisión + ficha médica (todos campos de `students`), responsables (`parent_students`+`profiles`), historial académico multi-año con nota final por clase (`enrollments`→`academic_terms`→`class_enrollments`→`classes`→`courses`), boletines publicados (`report_cards`+`report_card_details`), documentos del expediente (`student_documents`), asistencia (historial + resumen present/absent/late/excused) y alertas (deserción/notas bajas/disciplina), y facturas + pagos (`invoices`+`invoice_line_items`+`payments`).
+  - Nuevo componente `src/portals/StudentFile.tsx`: modal de pantalla completa con 5 pestañas (Datos Generales, Historial Académico, Asistencia y Alertas, Documentos, Cobros y Pagos). Se abre con el botón "Expediente" agregado a cada fila del Directorio de Alumnos (`StudentDirectory.tsx`).
+  - **Bug real descubierto y corregido de paso**: `backend/routes/attendance.ts` (el motor de alertas de deserción por 3 faltas consecutivas + SMS por Twilio, construido en una sesión anterior) escribía y leía de las tablas `attendance_records` y `student_alerts`, pero esas tablas **nunca se habían aplicado a producción** — solo existían diseñadas en `database_schemas/attendance_schema.md` sin migrar. O sea, pasar lista en el Portal Docente fallaba en silencio (insert a una tabla inexistente → error 500 atrapado por el catch genérico) desde que se construyó esa feature. Se aplicó la migración `attendance_records_and_student_alerts` (tablas, enums, índices y políticas RLS, tal cual estaba diseñada en el `.md`) contra producción — ahora sí funciona, y además alimenta la pestaña de Asistencia del nuevo Expediente.
+  - Dos endpoints nuevos de apoyo en `attendance.ts`: `GET /api/v1/attendance/history/:student_id` (historial completo + resumen) y `GET /api/v1/attendance/alerts-history/:student_id` (todas las alertas, resueltas e irresueltas — el endpoint viejo `/alert/:student_id` solo devuelve las pendientes y se dejó intacto para no romper su uso operativo actual).
+  - Typecheck limpio. Verificado: FKs de todos los embeds nuevos revisadas vía `pg_constraint` (sin ambigüedad, incluida la nueva `attendance_records.class_id → classes`); servidor local sirve el Portal Admin en HTTP 200 tras los cambios (Playwright no está instalado en el proyecto, ver nota de sesión anterior).
+
 ## 4. Tarea en curso
 
-Ninguna en este momento. Última tarea completada: escala de notas + períodos de evaluación + plan de evaluación ponderado por docente + cálculo automático de notas (ver arriba, "Todo completo" elegido por el usuario). Typecheck limpio (`npx tsc --noEmit` sin salida). Playwright no está instalado en el proyecto (`Cannot find module 'playwright'`) — se verificó en su lugar que el Portal Docente sirve HTTP 200 con el `<div id="root">` presente tras los cambios; dado que el sandbox tampoco puede alcanzar la DB real de Supabase (ver sección 6), esto es consistente con el estándar de verificación ya usado en la sesión.
+Ninguna en este momento. Última tarea completada: Expediente del Alumno consolidado del lado del colegio (ver arriba), incluida la corrección del bug de asistencia/alertas nunca migrado a producción.
 
 Tarea completada justo antes: personal expatriado/honorarios profesionales + primera versión (sin desglose) del acumulado mensual de nómina.
 
