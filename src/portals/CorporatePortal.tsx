@@ -29,10 +29,18 @@ interface Department {
 
 interface Employee {
   id: string;
+  profile_id: string;
   hire_date: string;
   base_salary: number;
   status: string;
   profiles?: { first_name: string; last_name: string; role: string };
+}
+
+interface StaffOption {
+  id: string;
+  first_name: string;
+  last_name: string;
+  role: string;
 }
 
 interface PayrollRun {
@@ -93,6 +101,7 @@ export const CorporatePortal: React.FC = () => {
 
   // --- Nómina ---
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [staffOptions, setStaffOptions] = useState<StaffOption[]>([]);
   const [payrollRuns, setPayrollRuns] = useState<PayrollRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [paystubs, setPaystubs] = useState<Paystub[]>([]);
@@ -104,14 +113,17 @@ export const CorporatePortal: React.FC = () => {
 
   const loadPayrollData = async () => {
     try {
-      const [employeesRes, runsRes] = await Promise.all([
+      const [employeesRes, runsRes, staffRes] = await Promise.all([
         fetch(`/api/v1/corporate/employees?tenant_id=${DEMO_TENANT_ID}`),
         fetch(`/api/v1/corporate/payroll/runs?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/hierarchy/staff?tenant_id=${DEMO_TENANT_ID}`),
       ]);
       const employeesData = await employeesRes.json();
       const runsData = await runsRes.json();
+      const staffData = await staffRes.json();
       setEmployees(employeesData.employees || []);
       setPayrollRuns(runsData.runs || []);
+      setStaffOptions(staffData.staff || []);
     } catch {
       setMessage('❌ No se pudo conectar con el servidor SIS.');
     }
@@ -721,11 +733,21 @@ export const CorporatePortal: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
               <h2 className="font-bold text-slate-700 flex items-center"><Users className="w-4 h-4 mr-2 text-blue-600" /> Dar de Alta Empleado en Nómina</h2>
-              <input
-                type="text" placeholder="ID de perfil (profile_id del staff)" value={employeeForm.profile_id}
+              <select
+                value={employeeForm.profile_id}
                 onChange={e => setEmployeeForm({ ...employeeForm, profile_id: e.target.value })}
                 className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              >
+                <option value="">Selecciona un docente/staff</option>
+                {staffOptions
+                  .filter(s => !employees.some(e => e.profile_id === s.id))
+                  .map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name} ({s.role})</option>)}
+              </select>
+              {staffOptions.length === 0 && (
+                <p className="text-xs text-slate-400">
+                  Aún no hay docentes/staff creados. Ve a Admin → Organización → "Agregar Docente / Staff" primero.
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-slate-400">Fecha de contratación</label>
