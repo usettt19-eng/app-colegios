@@ -85,6 +85,37 @@ router.post("/", requireAuth, requireRole("super_admin"), async (req: Request, r
   }
 });
 
+// PATCH /api/v1/tenants/:id/grading-scale
+// Configura la escala de notas del colegio (ej. sobre 100, sobre 10, sobre
+// 5) y la nota mínima de aprobación, en esa misma escala.
+router.patch("/:id/grading-scale", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { grading_scale_max, passing_grade } = req.body;
+
+    if (grading_scale_max === undefined || passing_grade === undefined) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (grading_scale_max, passing_grade)" });
+    }
+    if (Number(passing_grade) > Number(grading_scale_max)) {
+      return res.status(400).json({ error: "La nota de aprobación no puede ser mayor que la nota máxima de la escala." });
+    }
+
+    const { data: tenant, error } = await supabaseAdmin
+      .from("tenants")
+      .update({ grading_scale_max, passing_grade })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error || !tenant) return res.status(404).json({ error: "Colegio no encontrado." });
+
+    return res.status(200).json({ success: true, message: "Escala de notas actualizada.", tenant });
+  } catch (error: any) {
+    console.error("Error en PATCH /api/v1/tenants/:id/grading-scale:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // POST /api/v1/tenants/:id/admins
 // El super_admin de la plataforma crea el administrador de un colegio:
 // da de alta su cuenta real en Supabase Auth (vía Admin API) y su perfil,

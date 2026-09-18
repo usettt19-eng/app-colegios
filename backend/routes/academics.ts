@@ -510,4 +510,323 @@ router.delete("/schedules/:id", async (req: Request, res: Response) => {
   }
 });
 
+// ==========================================
+// Períodos de Evaluación (trimestres/lapsos/cuatrimestres)
+// ==========================================
+
+// GET /api/v1/academics/grading-periods?term_id=...
+router.get("/grading-periods", async (req: Request, res: Response) => {
+  try {
+    const { term_id } = req.query;
+    if (!term_id) return res.status(400).json({ error: "Falta term_id" });
+
+    const { data, error } = await supabaseAdmin
+      .from("grading_periods")
+      .select("*")
+      .eq("term_id", term_id)
+      .order("sort_order");
+
+    if (error) return res.status(500).json({ error: "Error al consultar los períodos de evaluación." });
+    return res.status(200).json({ success: true, gradingPeriods: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/academics/grading-periods:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/academics/grading-periods
+// El colegio define sus propios períodos dentro de un año lectivo (ej. 3
+// trimestres, 2 cuatrimestres, 4 lapsos... el nombre y la cantidad los
+// decide el colegio).
+router.post("/grading-periods", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, term_id, name, start_date, end_date, sort_order, weight_percent } = req.body;
+    if (!tenant_id || !term_id || !name || !start_date || !end_date) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, term_id, name, start_date, end_date)" });
+    }
+
+    const { data: gradingPeriod, error } = await supabaseAdmin
+      .from("grading_periods")
+      .insert({ tenant_id, term_id, name, start_date, end_date, sort_order: sort_order ?? 0, weight_percent: weight_percent || null })
+      .select()
+      .single();
+
+    if (error || !gradingPeriod) {
+      console.error("Error al crear el período de evaluación:", error);
+      return res.status(500).json({ error: "Error al crear el período de evaluación." });
+    }
+
+    return res.status(201).json({ success: true, message: "Período de evaluación creado.", gradingPeriod });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/academics/grading-periods:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// DELETE /api/v1/academics/grading-periods/:id
+router.delete("/grading-periods/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabaseAdmin.from("grading_periods").delete().eq("id", id);
+    if (error) return res.status(500).json({ error: "No se pudo eliminar el período de evaluación." });
+    return res.status(200).json({ success: true, message: "Período de evaluación eliminado." });
+  } catch (error: any) {
+    console.error("Error en DELETE /api/v1/academics/grading-periods/:id:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// ==========================================
+// Plan de Evaluación (% por tipo de actividad, por grupo/clase)
+// ==========================================
+
+// GET /api/v1/academics/classes/:id/evaluation-plan
+router.get("/classes/:id/evaluation-plan", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabaseAdmin
+      .from("evaluation_plan_items")
+      .select("*")
+      .eq("class_id", id);
+
+    if (error) return res.status(500).json({ error: "Error al consultar el plan de evaluación." });
+    return res.status(200).json({ success: true, evaluationPlan: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/academics/classes/:id/evaluation-plan:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/academics/classes/:id/evaluation-plan
+// El docente define/actualiza el % que vale cada tipo de actividad
+// (tarea/examen/actividad/proyecto) en la nota de este grupo. Se puede
+// llamar varias veces para ir ajustando cada categoría (upsert).
+router.post("/classes/:id/evaluation-plan", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { tenant_id, category, weight_percent } = req.body;
+    if (!tenant_id || !category || weight_percent === undefined) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, category, weight_percent)" });
+    }
+
+    const { data: item, error } = await supabaseAdmin
+      .from("evaluation_plan_items")
+      .upsert({ tenant_id, class_id: id, category, weight_percent }, { onConflict: "class_id, category" })
+      .select()
+      .single();
+
+    if (error || !item) {
+      console.error("Error al guardar el plan de evaluación:", error);
+      return res.status(500).json({ error: "Error al guardar el plan de evaluación." });
+    }
+
+    return res.status(200).json({ success: true, message: "Plan de evaluación actualizado.", item });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/academics/classes/:id/evaluation-plan:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// DELETE /api/v1/academics/classes/:id/evaluation-plan/:category
+router.delete("/classes/:id/evaluation-plan/:category", async (req: Request, res: Response) => {
+  try {
+    const { id, category } = req.params;
+    const { error } = await supabaseAdmin
+      .from("evaluation_plan_items")
+      .delete()
+      .eq("class_id", id)
+      .eq("category", category);
+
+    if (error) return res.status(500).json({ error: "No se pudo quitar la categoría del plan de evaluación." });
+    return res.status(200).json({ success: true, message: "Categoría quitada del plan de evaluación." });
+  } catch (error: any) {
+    console.error("Error en DELETE /api/v1/academics/classes/:id/evaluation-plan/:category:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// ==========================================
+// Cálculo de Notas por Período
+// ==========================================
+
+// POST /api/v1/academics/classes/:id/grading-periods/:periodId/calculate
+// Calcula la nota de cada alumno matriculado en este grupo para el
+// período indicado, a partir del plan de evaluación (% por categoría) y
+// el promedio de sus entregas calificadas de esa categoría en ese
+// período. Si una categoría del plan no tiene entregas calificadas en el
+// período, esa categoría no participa en el cálculo de ese alumno (para
+// no penalizarlo con un cero que no corresponde a ninguna actividad real).
+router.post("/classes/:id/grading-periods/:periodId/calculate", async (req: Request, res: Response) => {
+  try {
+    const { id: classId, periodId } = req.params;
+    const { tenant_id } = req.body;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    const { data: plan } = await supabaseAdmin
+      .from("evaluation_plan_items")
+      .select("category, weight_percent")
+      .eq("class_id", classId);
+
+    if (!plan || plan.length === 0) {
+      return res.status(400).json({ error: "Este grupo todavía no tiene un plan de evaluación configurado." });
+    }
+
+    const { data: tenant } = await supabaseAdmin.from("tenants").select("grading_scale_max").eq("id", tenant_id).single();
+    const scaleMax = Number(tenant?.grading_scale_max || 100);
+
+    const { data: roster } = await supabaseAdmin
+      .from("class_enrollments")
+      .select("id, enrollment_id, enrollments!inner(student_id)")
+      .eq("class_id", classId);
+
+    if (!roster || roster.length === 0) {
+      return res.status(400).json({ error: "Este grupo no tiene alumnos matriculados." });
+    }
+
+    const { data: assignmentsInPeriod } = await supabaseAdmin
+      .from("assignments")
+      .select("id, type, max_score")
+      .eq("class_id", classId)
+      .eq("grading_period_id", periodId);
+
+    const assignmentIds = (assignmentsInPeriod || []).map(a => a.id);
+    const assignmentById = new Map((assignmentsInPeriod || []).map(a => [a.id, a]));
+
+    const { data: submissions } = assignmentIds.length > 0
+      ? await supabaseAdmin
+          .from("student_assignments")
+          .select("student_id, assignment_id, score")
+          .in("assignment_id", assignmentIds)
+          .not("score", "is", null)
+      : { data: [] as any[] };
+
+    const results: { class_enrollment_id: string; student_id: string; calculated_grade: number }[] = [];
+
+    for (const ce of roster as any[]) {
+      const studentId = ce.enrollments.student_id;
+      const studentSubmissions = (submissions || []).filter((s: any) => s.student_id === studentId);
+
+      // Promedio (en %) de cada categoría con entregas calificadas
+      const categoryPercents: Record<string, number> = {};
+      for (const category of ["tarea", "examen", "actividad", "proyecto"]) {
+        const scores = studentSubmissions
+          .map((s: any) => {
+            const a = assignmentById.get(s.assignment_id);
+            if (!a || a.type !== category) return null;
+            return (Number(s.score) / Number(a.max_score)) * 100;
+          })
+          .filter((v): v is number => v !== null);
+        if (scores.length > 0) {
+          categoryPercents[category] = scores.reduce((sum, v) => sum + v, 0) / scores.length;
+        }
+      }
+
+      const applicablePlan = plan.filter(p => categoryPercents[p.category] !== undefined);
+      if (applicablePlan.length === 0) continue; // sin entregas calificadas todavía, no se calcula
+
+      const totalWeight = applicablePlan.reduce((sum, p) => sum + Number(p.weight_percent), 0);
+      const weightedPercent = applicablePlan.reduce(
+        (sum, p) => sum + categoryPercents[p.category] * (Number(p.weight_percent) / totalWeight),
+        0
+      );
+      const calculatedGrade = Number(((weightedPercent / 100) * scaleMax).toFixed(2));
+
+      results.push({ class_enrollment_id: ce.id, student_id: studentId, calculated_grade: calculatedGrade });
+    }
+
+    if (results.length === 0) {
+      return res.status(400).json({ error: "Ningún alumno tiene entregas calificadas en este período todavía." });
+    }
+
+    const { error: upsertError } = await supabaseAdmin.from("period_grades").upsert(
+      results.map(r => ({ tenant_id, class_enrollment_id: r.class_enrollment_id, grading_period_id: periodId, calculated_grade: r.calculated_grade })),
+      { onConflict: "class_enrollment_id, grading_period_id" }
+    );
+
+    if (upsertError) {
+      console.error("Error al guardar las notas del período:", upsertError);
+      return res.status(500).json({ error: "Error al guardar las notas calculadas." });
+    }
+
+    return res.status(200).json({ success: true, message: `Notas calculadas para ${results.length} alumno(s).`, results });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/academics/classes/:id/grading-periods/:periodId/calculate:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// GET /api/v1/academics/classes/:id/grading-periods/:periodId/grades
+// Lista las notas ya calculadas de un grupo para un período (para que el
+// docente las revise antes de consolidar/publicar).
+router.get("/classes/:id/grading-periods/:periodId/grades", async (req: Request, res: Response) => {
+  try {
+    const { id: classId, periodId } = req.params;
+
+    const { data, error } = await supabaseAdmin
+      .from("period_grades")
+      .select("*, class_enrollments!inner(class_id, enrollments(students(first_name, last_name)))")
+      .eq("grading_period_id", periodId)
+      .eq("class_enrollments.class_id", classId);
+
+    if (error) return res.status(500).json({ error: "Error al consultar las notas del período." });
+    return res.status(200).json({ success: true, grades: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/academics/classes/:id/grading-periods/:periodId/grades:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/academics/classes/:id/consolidate-final-grade
+// Promedia (ponderado por weight_percent de cada período, o por igual si
+// no se configuró) los period_grades ya calculados de cada alumno en este
+// grupo, y actualiza class_enrollments.final_grade — la nota anual que ya
+// usa el módulo de boletines (bulletins.ts) tal como estaba.
+router.post("/classes/:id/consolidate-final-grade", async (req: Request, res: Response) => {
+  try {
+    const { id: classId } = req.params;
+
+    const { data: roster } = await supabaseAdmin
+      .from("class_enrollments")
+      .select("id")
+      .eq("class_id", classId);
+
+    if (!roster || roster.length === 0) {
+      return res.status(400).json({ error: "Este grupo no tiene alumnos matriculados." });
+    }
+
+    const enrollmentIds = roster.map(ce => ce.id);
+
+    const { data: periodGrades } = await supabaseAdmin
+      .from("period_grades")
+      .select("class_enrollment_id, calculated_grade, grading_periods(weight_percent)")
+      .in("class_enrollment_id", enrollmentIds);
+
+    let updated = 0;
+    for (const enrollmentId of enrollmentIds) {
+      const grades = (periodGrades || []).filter((g: any) => g.class_enrollment_id === enrollmentId);
+      if (grades.length === 0) continue;
+
+      const hasWeights = grades.every((g: any) => g.grading_periods?.weight_percent);
+      let finalGrade: number;
+      if (hasWeights) {
+        const totalWeight = grades.reduce((sum: number, g: any) => sum + Number(g.grading_periods.weight_percent), 0);
+        finalGrade = grades.reduce((sum: number, g: any) => sum + Number(g.calculated_grade) * (Number(g.grading_periods.weight_percent) / totalWeight), 0);
+      } else {
+        finalGrade = grades.reduce((sum: number, g: any) => sum + Number(g.calculated_grade), 0) / grades.length;
+      }
+
+      await supabaseAdmin
+        .from("class_enrollments")
+        .update({ final_grade: Number(finalGrade.toFixed(2)) })
+        .eq("id", enrollmentId);
+      updated++;
+    }
+
+    return res.status(200).json({ success: true, message: `Nota final consolidada para ${updated} alumno(s).` });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/academics/classes/:id/consolidate-final-grade:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 export default router;

@@ -88,7 +88,7 @@ router.get("/:id/submissions", async (req: Request, res: Response) => {
 // El profesor crea una nueva tarea para una clase
 router.post("/", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, class_id, teacher_id, title, description, due_date, max_score, type } = req.body;
+    const { tenant_id, class_id, teacher_id, title, description, due_date, max_score, type, grading_period_id } = req.body;
 
     if (!tenant_id || !class_id || !teacher_id || !title || !due_date) {
       return res.status(400).json({ error: "Faltan parámetros requeridos para crear la tarea." });
@@ -105,7 +105,8 @@ router.post("/", async (req: Request, res: Response) => {
         description,
         due_date,
         max_score: max_score || 100,
-        type: type || "tarea"
+        type: type || "tarea",
+        grading_period_id: grading_period_id || null,
       })
       .select()
       .single();

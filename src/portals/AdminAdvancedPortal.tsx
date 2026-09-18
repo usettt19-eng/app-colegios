@@ -61,6 +61,16 @@ interface Term {
   is_active: boolean;
 }
 
+interface GradingPeriod {
+  id: string;
+  term_id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  sort_order: number;
+  weight_percent: number | null;
+}
+
 interface Course {
   id: string;
   code: string;
@@ -129,6 +139,10 @@ export const AdminAdvancedPortal: React.FC = () => {
   const [classes, setClasses] = useState<ClassGroup[]>([]);
 
   const [termForm, setTermForm] = useState({ name: '', start_date: '', end_date: '', is_active: false });
+  const [gradingScaleForm, setGradingScaleForm] = useState({ grading_scale_max: '100', passing_grade: '70' });
+  const [selectedTermForPeriods, setSelectedTermForPeriods] = useState('');
+  const [gradingPeriods, setGradingPeriods] = useState<GradingPeriod[]>([]);
+  const [gradingPeriodForm, setGradingPeriodForm] = useState({ name: '', start_date: '', end_date: '', weight_percent: '' });
   const [courseForm, setCourseForm] = useState({ code: '', name: '', area: '' });
   const [courseGradeLevelIds, setCourseGradeLevelIds] = useState<string[]>([]);
   const [generateGroupsForm, setGenerateGroupsForm] = useState<Record<string, { term_id: string; teacher_id: string }>>({});
@@ -181,17 +195,25 @@ export const AdminAdvancedPortal: React.FC = () => {
 
   const loadAll = async () => {
     try {
-      const [termsRes, coursesRes, classesRes] = await Promise.all([
+      const [termsRes, coursesRes, classesRes, tenantRes] = await Promise.all([
         fetch(`/api/v1/academics/terms?tenant_id=${DEMO_TENANT_ID}`),
         fetch(`/api/v1/academics/courses?tenant_id=${DEMO_TENANT_ID}`),
         fetch(`/api/v1/academics/classes?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/tenants/${DEMO_TENANT_ID}`),
       ]);
       const termsData = await termsRes.json();
       const coursesData = await coursesRes.json();
       const classesData = await classesRes.json();
+      const tenantData = await tenantRes.json();
       setTerms(termsData.terms || []);
       setCourses(coursesData.courses || []);
       setClasses(classesData.classes || []);
+      if (tenantData.tenant) {
+        setGradingScaleForm({
+          grading_scale_max: String(tenantData.tenant.grading_scale_max ?? 100),
+          passing_grade: String(tenantData.tenant.passing_grade ?? 70),
+        });
+      }
     } catch {
       setMessage('❌ No se pudo conectar con el servidor SIS.');
     }
@@ -627,6 +649,93 @@ export const AdminAdvancedPortal: React.FC = () => {
     setLoading(false);
   };
 
+  const handleSaveGradingScale = async () => {
+    if (!gradingScaleForm.grading_scale_max || !gradingScaleForm.passing_grade) {
+      setMessage('❌ Completa la nota máxima y la nota de aprobación.');
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/tenants/${DEMO_TENANT_ID}/grading-scale`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grading_scale_max: Number(gradingScaleForm.grading_scale_max),
+          passing_grade: Number(gradingScaleForm.passing_grade),
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Escala de notas actualizada.');
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo actualizar la escala de notas.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setLoading(false);
+  };
+
+  const loadGradingPeriods = async (termId: string) => {
+    if (!termId) {
+      setGradingPeriods([]);
+      return;
+    }
+    try {
+      const response = await fetch(`/api/v1/academics/grading-periods?term_id=${termId}`);
+      const data = await response.json();
+      setGradingPeriods(data.gradingPeriods || []);
+    } catch {
+      setGradingPeriods([]);
+    }
+  };
+
+  const handleCreateGradingPeriod = async () => {
+    if (!selectedTermForPeriods || !gradingPeriodForm.name || !gradingPeriodForm.start_date || !gradingPeriodForm.end_date) {
+      setMessage('❌ Selecciona un año lectivo y completa nombre, inicio y fin del período.');
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/academics/grading-periods', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          term_id: selectedTermForPeriods,
+          name: gradingPeriodForm.name,
+          start_date: gradingPeriodForm.start_date,
+          end_date: gradingPeriodForm.end_date,
+          sort_order: gradingPeriods.length,
+          weight_percent: gradingPeriodForm.weight_percent ? Number(gradingPeriodForm.weight_percent) : undefined,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Período de evaluación creado.');
+        setGradingPeriodForm({ name: '', start_date: '', end_date: '', weight_percent: '' });
+        loadGradingPeriods(selectedTermForPeriods);
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo crear el período de evaluación.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setLoading(false);
+  };
+
+  const handleDeleteGradingPeriod = async (id: string) => {
+    setMessage('');
+    try {
+      await fetch(`/api/v1/academics/grading-periods/${id}`, { method: 'DELETE' });
+      loadGradingPeriods(selectedTermForPeriods);
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
   const handleCreateCourse = async () => {
     if (!courseForm.code || !courseForm.name) {
       setMessage('❌ Completa el código y nombre del curso.');
@@ -908,6 +1017,7 @@ export const AdminAdvancedPortal: React.FC = () => {
 
       {/* Años Lectivos */}
       {activeTab === 'terms' && (
+        <div className="space-y-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
             <h2 className="font-bold text-slate-700 flex items-center"><Plus className="w-4 h-4 mr-2 text-rose-600" /> Configurar Nuevo Año Lectivo</h2>
@@ -971,6 +1081,103 @@ export const AdminAdvancedPortal: React.FC = () => {
               </div>
             )}
           </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <h2 className="font-bold text-slate-700 flex items-center"><CheckCircle className="w-4 h-4 mr-2 text-rose-600" /> Escala de Notas y Aprobación</h2>
+            <p className="text-sm text-slate-500">Define sobre qué escala se califica en todo el colegio (ej. sobre 100, sobre 10, sobre 5) y la nota mínima para aprobar.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-slate-400">Nota máxima de la escala</label>
+                <input
+                  type="number" value={gradingScaleForm.grading_scale_max}
+                  onChange={e => setGradingScaleForm({ ...gradingScaleForm, grading_scale_max: e.target.value })}
+                  className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400">Nota mínima de aprobación</label>
+                <input
+                  type="number" value={gradingScaleForm.passing_grade}
+                  onChange={e => setGradingScaleForm({ ...gradingScaleForm, passing_grade: e.target.value })}
+                  className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                />
+              </div>
+            </div>
+            <button
+              onClick={handleSaveGradingScale}
+              disabled={loading}
+              className="flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50 font-semibold"
+            >
+              {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2" />}
+              Guardar Escala
+            </button>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <h2 className="font-bold text-slate-700 flex items-center"><CalendarClock className="w-4 h-4 mr-2 text-rose-600" /> Períodos de Evaluación</h2>
+            <p className="text-sm text-slate-500">Divide un año lectivo en trimestres, lapsos, cuatrimestres o bimestres — tú decides cuántos y cómo se llaman.</p>
+            <select
+              value={selectedTermForPeriods}
+              onChange={e => { setSelectedTermForPeriods(e.target.value); loadGradingPeriods(e.target.value); }}
+              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+            >
+              <option value="">Selecciona el año lectivo</option>
+              {terms.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+
+            {selectedTermForPeriods && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="text" placeholder="Nombre (ej. 1er Trimestre)" value={gradingPeriodForm.name}
+                    onChange={e => setGradingPeriodForm({ ...gradingPeriodForm, name: e.target.value })}
+                    className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                  <input
+                    type="number" placeholder="% de la nota anual (opcional)" value={gradingPeriodForm.weight_percent}
+                    onChange={e => setGradingPeriodForm({ ...gradingPeriodForm, weight_percent: e.target.value })}
+                    className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                  <input
+                    type="date" value={gradingPeriodForm.start_date}
+                    onChange={e => setGradingPeriodForm({ ...gradingPeriodForm, start_date: e.target.value })}
+                    className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                  <input
+                    type="date" value={gradingPeriodForm.end_date}
+                    onChange={e => setGradingPeriodForm({ ...gradingPeriodForm, end_date: e.target.value })}
+                    className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                </div>
+                <button
+                  onClick={handleCreateGradingPeriod}
+                  disabled={loading}
+                  className="flex items-center px-4 py-2 bg-slate-700 text-white rounded-md hover:bg-slate-800 disabled:opacity-50 font-semibold text-sm"
+                >
+                  {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                  Agregar Período
+                </button>
+
+                {gradingPeriods.length === 0 ? (
+                  <p className="text-sm text-slate-400">Este año lectivo aún no tiene períodos configurados.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100">
+                    {gradingPeriods.map(gp => (
+                      <span key={gp.id} className="flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600">
+                        {gp.name} ({gp.start_date} → {gp.end_date}){gp.weight_percent ? ` — ${gp.weight_percent}%` : ''}
+                        <button onClick={() => handleDeleteGradingPeriod(gp.id)} className="hover:text-rose-600">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
         </div>
       )}
 

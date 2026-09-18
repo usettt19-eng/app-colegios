@@ -4,7 +4,7 @@ import { MessagingInbox } from './MessagingInbox';
 import { useAuth } from '../contexts/AuthContext';
 import { LoginPage } from './LoginPage';
 
-type TabId = 'attendance' | 'assignments' | 'grades' | 'messages';
+type TabId = 'attendance' | 'assignments' | 'evaluation' | 'grades' | 'messages';
 
 interface ClassGroup {
   id: string;
@@ -38,6 +38,24 @@ interface Assignment {
   max_score: number;
 }
 
+interface GradingPeriod {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  weight_percent: number | null;
+}
+
+interface EvaluationPlanItem {
+  category: string;
+  weight_percent: number;
+}
+
+interface CalculatedGradeResult {
+  student_id: string;
+  calculated_grade: number;
+}
+
 interface Submission {
   id: string;
   student_id: string;
@@ -67,8 +85,16 @@ const TeacherPortalInner: React.FC<InnerProps> = ({ tenantId, teacherId, teacher
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string>('');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [assignmentForm, setAssignmentForm] = useState({ title: '', description: '', due_date: '', max_score: '100', type: 'tarea' });
+  const [assignmentForm, setAssignmentForm] = useState({ title: '', description: '', due_date: '', max_score: '100', type: 'tarea', grading_period_id: '' });
   const [scoreDrafts, setScoreDrafts] = useState<Record<string, string>>({});
+
+  // --- Plan de Evaluación y Notas por Período ---
+  const [gradingPeriods, setGradingPeriods] = useState<GradingPeriod[]>([]);
+  const [evaluationPlan, setEvaluationPlan] = useState<EvaluationPlanItem[]>([]);
+  const [evaluationPlanDrafts, setEvaluationPlanDrafts] = useState<Record<string, string>>({});
+  const [selectedPeriodId, setSelectedPeriodId] = useState('');
+  const [calculatedResults, setCalculatedResults] = useState<CalculatedGradeResult[]>([]);
+  const [evaluationLoading, setEvaluationLoading] = useState(false);
 
   // --- Notas Finales y Boletines ---
   const [gradesRoster, setGradesRoster] = useState<GradeRosterStudent[]>([]);
@@ -95,8 +121,105 @@ const TeacherPortalInner: React.FC<InnerProps> = ({ tenantId, teacherId, teacher
     if (!selectedClassId) return;
     loadRoster();
     if (activeTab === 'assignments') loadAssignments();
-    if (activeTab === 'grades') loadGradesRoster();
+    if (activeTab === 'grades' || activeTab === 'evaluation') loadGradesRoster();
+    if (activeTab === 'evaluation' || activeTab === 'assignments') loadEvaluationPlan();
+    if (activeTab === 'evaluation' || activeTab === 'assignments') loadGradingPeriods();
   }, [selectedClassId, activeTab]);
+
+  const loadGradingPeriods = async () => {
+    if (!currentClass?.term_id) {
+      setGradingPeriods([]);
+      return;
+    }
+    try {
+      const response = await fetch(`/api/v1/academics/grading-periods?term_id=${currentClass.term_id}`);
+      const data = await response.json();
+      setGradingPeriods(data.gradingPeriods || []);
+    } catch {
+      setGradingPeriods([]);
+    }
+  };
+
+  const loadEvaluationPlan = async () => {
+    try {
+      const response = await fetch(`/api/v1/academics/classes/${selectedClassId}/evaluation-plan`);
+      const data = await response.json();
+      setEvaluationPlan(data.evaluationPlan || []);
+    } catch {
+      setEvaluationPlan([]);
+    }
+  };
+
+  const handleSaveEvaluationPlanCategory = async (category: string) => {
+    const weight = evaluationPlanDrafts[category];
+    if (!weight) {
+      setMessage('❌ Indica el % para esta categoría.');
+      return;
+    }
+    setEvaluationLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/academics/classes/${selectedClassId}/evaluation-plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, category, weight_percent: Number(weight) }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Plan de evaluación actualizado.');
+        loadEvaluationPlan();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo guardar.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setEvaluationLoading(false);
+  };
+
+  const handleCalculatePeriodGrades = async () => {
+    if (!selectedPeriodId) {
+      setMessage('❌ Selecciona el período de evaluación a calcular.');
+      return;
+    }
+    setEvaluationLoading(true);
+    setMessage('');
+    setCalculatedResults([]);
+    try {
+      const response = await fetch(`/api/v1/academics/classes/${selectedClassId}/grading-periods/${selectedPeriodId}/calculate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ ' + data.message);
+        setCalculatedResults(data.results || []);
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudieron calcular las notas.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setEvaluationLoading(false);
+  };
+
+  const handleConsolidateFinalGrade = async () => {
+    setEvaluationLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/academics/classes/${selectedClassId}/consolidate-final-grade`, { method: 'POST' });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ ' + data.message);
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo consolidar la nota final.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setEvaluationLoading(false);
+  };
 
   const loadGradesRoster = async () => {
     setGradesLoading(true);
@@ -250,12 +373,13 @@ const TeacherPortalInner: React.FC<InnerProps> = ({ tenantId, teacherId, teacher
           due_date: assignmentForm.due_date,
           max_score: Number(assignmentForm.max_score) || 100,
           type: assignmentForm.type,
+          grading_period_id: assignmentForm.grading_period_id || undefined,
         }),
       });
       const data = await response.json();
       if (data.success) {
         setMessage('✅ Tarea creada y asignada a los alumnos.');
-        setAssignmentForm({ title: '', description: '', due_date: '', max_score: '100', type: 'tarea' });
+        setAssignmentForm({ title: '', description: '', due_date: '', max_score: '100', type: 'tarea', grading_period_id: '' });
         loadAssignments();
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo crear la tarea.'));
@@ -359,6 +483,12 @@ const TeacherPortalInner: React.FC<InnerProps> = ({ tenantId, teacherId, teacher
             className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center text-sm ${activeTab === 'assignments' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}
           >
             <BookOpen className="w-4 h-4 mr-2" /> Tareas y Calificaciones
+          </button>
+          <button
+            onClick={() => setActiveTab('evaluation')}
+            className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center text-sm ${activeTab === 'evaluation' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}
+          >
+            <Award className="w-4 h-4 mr-2" /> Plan de Evaluación
           </button>
           <button
             onClick={() => setActiveTab('grades')}
@@ -491,7 +621,17 @@ const TeacherPortalInner: React.FC<InnerProps> = ({ tenantId, teacherId, teacher
                 className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
-            <p className="text-xs text-gray-400">El tipo determina cómo se ve en el calendario "Notas y Agendas" del padre (Tarea/Examen/Actividad/Proyecto).</p>
+            <select
+              value={assignmentForm.grading_period_id}
+              onChange={e => setAssignmentForm({ ...assignmentForm, grading_period_id: e.target.value })}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">Sin período de evaluación asignado</option>
+              {gradingPeriods.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400">El tipo determina cómo se ve en el calendario "Notas y Agendas" del padre (Tarea/Examen/Actividad/Proyecto). El período de evaluación determina en qué lapso/trimestre se contabiliza esta nota.</p>
             <button
               onClick={handleCreateAssignment}
               disabled={isSubmitting}
@@ -565,6 +705,96 @@ const TeacherPortalInner: React.FC<InnerProps> = ({ tenantId, teacherId, teacher
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {activeTab === 'evaluation' && classes.length > 0 && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-5 space-y-3">
+            <h2 className="font-semibold text-gray-800 flex items-center"><Award className="w-4 h-4 mr-2 text-indigo-600" /> Plan de Evaluación de {currentClass?.courses?.name || 'la materia'}</h2>
+            <p className="text-xs text-gray-400">Define el % que cada tipo de actividad aporta a la nota del período. Los porcentajes se toman por categoría (Tarea, Examen, Actividad, Proyecto); si un alumno no tiene trabajo calificado en alguna categoría, esa categoría se excluye y el resto se reajusta proporcionalmente.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {['tarea', 'examen', 'actividad', 'proyecto'].map(category => {
+                const current = evaluationPlan.find(p => p.category === category);
+                return (
+                  <div key={category} className="border border-gray-200 rounded-md p-3 flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-700 capitalize">{category}</p>
+                      <p className="text-xs text-gray-400">{current ? `Actual: ${current.weight_percent}%` : 'Sin definir'}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number" placeholder="%"
+                        defaultValue={current?.weight_percent ?? ''}
+                        onChange={e => setEvaluationPlanDrafts({ ...evaluationPlanDrafts, [category]: e.target.value })}
+                        className="w-16 border border-gray-300 rounded-md px-2 py-1 text-sm"
+                      />
+                      <button
+                        onClick={() => handleSaveEvaluationPlanCategory(category)}
+                        disabled={evaluationLoading}
+                        className="text-indigo-600 font-bold hover:text-indigo-800 bg-indigo-50 px-2 py-1 rounded text-xs disabled:opacity-50"
+                      >
+                        Guardar
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-5 space-y-3">
+            <h2 className="font-semibold text-gray-800 flex items-center"><GraduationCap className="w-4 h-4 mr-2 text-indigo-600" /> Cálculo de Notas por Período</h2>
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedPeriodId}
+                onChange={e => setSelectedPeriodId(e.target.value)}
+                className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">Selecciona un período de evaluación</option>
+                {gradingPeriods.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <button
+                onClick={handleCalculatePeriodGrades}
+                disabled={evaluationLoading}
+                className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 text-sm font-semibold"
+              >
+                {evaluationLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                Calcular Notas del Período
+              </button>
+            </div>
+            {gradingPeriods.length === 0 && (
+              <p className="text-xs text-gray-400">Este grupo aún no tiene períodos de evaluación configurados por el colegio para su año lectivo.</p>
+            )}
+            {calculatedResults.length > 0 && (
+              <div className="divide-y divide-gray-100 border border-gray-100 rounded-md mt-2">
+                {calculatedResults.map(r => {
+                  const student = gradesRoster.find(g => g.student_id === r.student_id);
+                  return (
+                    <div key={r.student_id} className="p-3 flex items-center justify-between text-sm">
+                      <span className="text-gray-700">{student ? `${student.first_name} ${student.last_name}` : r.student_id}</span>
+                      <span className="font-bold text-indigo-600">{r.calculated_grade}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-5 space-y-3">
+            <h2 className="font-semibold text-gray-800 flex items-center"><ClipboardCheck className="w-4 h-4 mr-2 text-indigo-600" /> Consolidar Nota Final</h2>
+            <p className="text-xs text-gray-400">Promedia (ponderado por el % de cada período, si el colegio lo definió) todas las notas de período ya calculadas y actualiza la Nota Final del alumno en el boletín.</p>
+            <button
+              onClick={handleConsolidateFinalGrade}
+              disabled={evaluationLoading}
+              className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 disabled:opacity-50 text-sm font-semibold"
+            >
+              {evaluationLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              Consolidar Nota Final
+            </button>
+          </div>
         </div>
       )}
 
