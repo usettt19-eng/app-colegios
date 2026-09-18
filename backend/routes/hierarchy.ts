@@ -61,12 +61,19 @@ router.get("/staff", async (req: Request, res: Response) => {
 
     const { data, error } = await supabaseAdmin
       .from("profiles")
-      .select("id, first_name, last_name, role, department_id, reports_to, departments(name)")
+      // Hay dos relaciones posibles entre profiles y departments
+      // (profiles.department_id -> departments.id, y también
+      // departments.head_id -> profiles.id), así que hay que indicarle a
+      // PostgREST cuál usar o responde 300 Multiple Choices.
+      .select("id, first_name, last_name, role, department_id, reports_to, departments!profiles_department_id_fkey(name)")
       .eq("tenant_id", tenant_id)
       .neq("role", "parent")
       .order("role");
 
-    if (error) return res.status(500).json({ error: "Error al consultar el staff." });
+    if (error) {
+      console.error("Error al consultar el staff:", error);
+      return res.status(500).json({ error: "Error al consultar el staff." });
+    }
     return res.status(200).json({ success: true, staff: data });
   } catch (error: any) {
     console.error("Error en GET /api/v1/hierarchy/staff:", error);
