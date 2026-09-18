@@ -56,7 +56,7 @@ CREATE TABLE public.courses (
     name TEXT NOT NULL,
     area TEXT, -- Área curricular (ej. "Humanística", "Científica", "Tecnológica"), para agrupar en la matriz de plan de estudios
     description TEXT,
-    credits DECIMAL(3,1),
+    weekly_hours DECIMAL(3,1), -- Horas de clase por semana; usado en el módulo de Horarios/distributivo docente
     created_at TIMESTAMPTZ DEFAULT now(),
     UNIQUE(tenant_id, code)
 );
