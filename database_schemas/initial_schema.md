@@ -49,6 +49,7 @@ CREATE TABLE public.profiles (
     photo_url TEXT,
     additional_tutor_name TEXT,
     additional_tutor_phone TEXT,
+    family_code TEXT, -- Código de familia (para importación masiva desde el sistema anterior del colegio)
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     UNIQUE (tenant_id, pin_code)
@@ -63,6 +64,7 @@ CREATE TABLE public.students (
     grade TEXT,
     section TEXT,
     photo_url TEXT,
+    family_code TEXT, -- Código de familia (para importación masiva desde el sistema anterior del colegio)
     self_dismissal_allowed BOOLEAN NOT NULL DEFAULT false,
     self_dismissal_qr_token TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
