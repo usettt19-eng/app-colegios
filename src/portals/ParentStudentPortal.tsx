@@ -82,6 +82,7 @@ const ParentStudentPortalInner: React.FC<InnerProps> = ({ tenantId, studentId, p
   const [reportCards, setReportCards] = useState<ReportCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
+  const [tuitionBlock, setTuitionBlock] = useState<{ blocked: boolean; monthsOverdue: number; threshold: number }>({ blocked: false, monthsOverdue: 0, threshold: 2 });
 
   // --- Recogida y Carpool ---
   const [replacements, setReplacements] = useState<ReplacementRequest[]>([]);
@@ -327,16 +328,21 @@ const ParentStudentPortalInner: React.FC<InnerProps> = ({ tenantId, studentId, p
     const loadData = async () => {
       setLoading(true);
       try {
-        const [enrollmentsRes, bulletinsRes] = await Promise.all([
+        const [enrollmentsRes, bulletinsRes, tuitionBlockRes] = await Promise.all([
           fetch(`/api/v1/enrollments/${DEMO_STUDENT_ID}`),
           fetch(`/api/v1/bulletins/${DEMO_STUDENT_ID}`),
+          fetch(`/api/v1/finance/tuition-block-status/${DEMO_STUDENT_ID}?tenant_id=${DEMO_TENANT_ID}`),
         ]);
 
         const enrollmentsData = await enrollmentsRes.json();
         const bulletinsData = await bulletinsRes.json();
+        const tuitionBlockData = await tuitionBlockRes.json();
 
         setEnrollments(enrollmentsData.enrollments || []);
         setReportCards(bulletinsData.reportCards || []);
+        if (tuitionBlockData.success) {
+          setTuitionBlock({ blocked: tuitionBlockData.blocked, monthsOverdue: tuitionBlockData.monthsOverdue, threshold: tuitionBlockData.threshold });
+        }
       } catch (error) {
         setMessage('❌ No se pudo conectar con el servidor SIS.');
       }
@@ -470,10 +476,14 @@ const ParentStudentPortalInner: React.FC<InnerProps> = ({ tenantId, studentId, p
               onGoToPayments={() => setActiveTab('payments')}
               onGoToAgenda={() => setActiveTab('agenda')}
               onGoToGrades={() => setActiveTab('grades')}
+              academicIndexBlocked={tuitionBlock.blocked}
             />
           )}
 
-          {activeTab === 'grades' && (
+          {activeTab === 'grades' && tuitionBlock.blocked && (
+            <TuitionBlockNotice tuitionBlock={tuitionBlock} onGoToPayments={() => setActiveTab('payments')} />
+          )}
+          {activeTab === 'grades' && !tuitionBlock.blocked && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="p-4 border-b border-slate-100 bg-slate-50">
                 <h2 className="font-bold text-slate-700">Historial de Matrículas y Calificaciones</h2>
@@ -515,7 +525,10 @@ const ParentStudentPortalInner: React.FC<InnerProps> = ({ tenantId, studentId, p
             </div>
           )}
 
-          {activeTab === 'bulletins' && (
+          {activeTab === 'bulletins' && tuitionBlock.blocked && (
+            <TuitionBlockNotice tuitionBlock={tuitionBlock} onGoToPayments={() => setActiveTab('payments')} />
+          )}
+          {activeTab === 'bulletins' && !tuitionBlock.blocked && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="p-4 border-b border-slate-100 bg-slate-50">
                 <h2 className="font-bold text-slate-700">Boletines de Calificaciones Publicados</h2>
@@ -885,6 +898,23 @@ const ParentStudentPortalInner: React.FC<InnerProps> = ({ tenantId, studentId, p
     </div>
   );
 };
+
+const TuitionBlockNotice: React.FC<{ tuitionBlock: { monthsOverdue: number; threshold: number }; onGoToPayments: () => void }> = ({ tuitionBlock, onGoToPayments }) => (
+  <div className="bg-rose-50 border border-rose-200 rounded-xl p-6 text-center space-y-3">
+    <AlertTriangle className="w-8 h-8 text-rose-500 mx-auto" />
+    <h2 className="font-bold text-rose-700">Acceso restringido por mora</h2>
+    <p className="text-sm text-rose-600 max-w-md mx-auto">
+      Esta cuenta tiene {tuitionBlock.monthsOverdue} {tuitionBlock.monthsOverdue === 1 ? 'mes vencido' : 'meses vencidos'} sin pagar
+      (el colegio restringe el acceso a partir de {tuitionBlock.threshold}). Regulariza tu situación en el Centro de Pagos para volver a ver esta sección.
+    </p>
+    <button
+      onClick={onGoToPayments}
+      className="inline-flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 font-semibold text-sm"
+    >
+      <CreditCard className="w-4 h-4 mr-2" /> Ir al Centro de Pagos
+    </button>
+  </div>
+);
 
 export const ParentStudentPortal: React.FC = () => {
   const { session, profile, children: authChildren, loading, signOut } = useAuth();

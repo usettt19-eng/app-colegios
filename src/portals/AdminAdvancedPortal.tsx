@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2, History, Bell, Send, Radio, DollarSign, X, Layers, Upload, Bus } from 'lucide-react';
+import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2, History, Bell, Send, Radio, DollarSign, X, Layers, Upload, Bus, AlertTriangle } from 'lucide-react';
 import { StudentDirectory } from './StudentDirectory';
 import { ParentDirectory } from './ParentDirectory';
 import { BulkImport } from './BulkImport';
@@ -161,6 +161,7 @@ export const AdminAdvancedPortal: React.FC = () => {
 
   const [termForm, setTermForm] = useState({ name: '', start_date: '', end_date: '', is_active: false });
   const [gradingScaleForm, setGradingScaleForm] = useState({ grading_scale_max: '100', passing_grade: '70' });
+  const [tuitionBlockForm, setTuitionBlockForm] = useState({ tuition_block_enabled: false, tuition_block_months_threshold: '2' });
   const [selectedTermForPeriods, setSelectedTermForPeriods] = useState('');
   const [gradingPeriods, setGradingPeriods] = useState<GradingPeriod[]>([]);
   const [gradingPeriodForm, setGradingPeriodForm] = useState({ name: '', start_date: '', end_date: '', weight_percent: '' });
@@ -244,6 +245,10 @@ export const AdminAdvancedPortal: React.FC = () => {
         setGradingScaleForm({
           grading_scale_max: String(tenantData.tenant.grading_scale_max ?? 100),
           passing_grade: String(tenantData.tenant.passing_grade ?? 70),
+        });
+        setTuitionBlockForm({
+          tuition_block_enabled: !!tenantData.tenant.tuition_block_enabled,
+          tuition_block_months_threshold: String(tenantData.tenant.tuition_block_months_threshold ?? 2),
         });
       }
     } catch {
@@ -799,6 +804,30 @@ export const AdminAdvancedPortal: React.FC = () => {
         setMessage('✅ Escala de notas actualizada.');
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo actualizar la escala de notas.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setLoading(false);
+  };
+
+  const handleSaveTuitionBlock = async () => {
+    setLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/tenants/${DEMO_TENANT_ID}/tuition-block`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tuition_block_enabled: tuitionBlockForm.tuition_block_enabled,
+          tuition_block_months_threshold: Number(tuitionBlockForm.tuition_block_months_threshold),
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Control de morosidad actualizado.');
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo actualizar el control de morosidad.'));
       }
     } catch {
       setMessage('❌ Error de conexión.');
@@ -1999,6 +2028,43 @@ export const AdminAdvancedPortal: React.FC = () => {
             >
               {creatingDiscount ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
               Asignar
+            </button>
+          </div>
+
+          {/* Control de Morosidad Restrictivo */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <div>
+              <h2 className="font-bold text-slate-700 flex items-center"><AlertTriangle className="w-4 h-4 mr-2 text-rose-600" /> Control de Morosidad Restrictivo</h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Si se activa, un padre con facturas vencidas sin pagar durante N o más meses distintos pierde acceso a ver Calificaciones y Boletines en el Portal de Padres (el Centro de Pagos sigue visible para que pueda regularizar). Apagado por defecto.
+              </p>
+            </div>
+            <div className="flex items-center gap-4 flex-wrap">
+              <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                <input
+                  type="checkbox" checked={tuitionBlockForm.tuition_block_enabled}
+                  onChange={e => setTuitionBlockForm({ ...tuitionBlockForm, tuition_block_enabled: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                Activar bloqueo por morosidad
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                Bloquear a partir de
+                <input
+                  type="number" min={1} value={tuitionBlockForm.tuition_block_months_threshold}
+                  onChange={e => setTuitionBlockForm({ ...tuitionBlockForm, tuition_block_months_threshold: e.target.value })}
+                  className="w-16 border border-slate-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                />
+                meses vencidos
+              </label>
+            </div>
+            <button
+              onClick={handleSaveTuitionBlock}
+              disabled={loading}
+              className="flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50 font-semibold text-sm"
+            >
+              {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              Guardar
             </button>
           </div>
 

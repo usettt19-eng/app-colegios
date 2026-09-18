@@ -2,7 +2,7 @@
 
 > Documento vivo. Actualízalo cada vez que se cierre o se abra una tarea importante.
 > Regla operativa: cada vez que Claude avance en algo, actualiza este archivo en el mismo commit. Para retomar contexto del proyecto, leer este archivo primero — no releer toda la sesión.
-> Última actualización: 2026-09-18 (Becas, Descuentos y Convenios)
+> Última actualización: 2026-09-18 (Control de Morosidad Restrictivo)
 
 ## 1. Qué es esto
 
@@ -120,9 +120,16 @@ Cada tabla tiene `tenant_id` (modelo multi-tenant). El repo vive en GitHub, rama
   - Verificado: FKs de `student_discounts` sin ambigüedad vía `pg_constraint`; insert/select/delete de prueba contra producción; typecheck limpio; Portal Admin sirve HTTP 200 en local tras los cambios.
   - **Fuera de alcance a propósito** (queda en el roadmap §5.1): Notas de Crédito y Anulaciones (cancelar una factura ya emitida por error) es un flujo contable distinto — no se tocó `invoices.status` más allá de lo que ya existía.
 
+- **Control de Morosidad Restrictivo** (tercer ítem "Core" del roadmap grande §5.1): si un colegio lo activa, un padre con facturas vencidas sin pagar durante N meses distintos o más pierde acceso a ver Calificaciones y Boletines en el Portal de Padres hasta regularizar — común en colegios privados como presión de cobro.
+  - `tenants` ganó `tuition_block_enabled` (default `false` — apagado hasta que el colegio decida activarlo) y `tuition_block_months_threshold` (default `2`). Se configura en Admin → Costos → "Control de Morosidad Restrictivo" (`PATCH /api/v1/tenants/:id/tuition-block`).
+  - Nuevo `GET /api/v1/finance/tuition-block-status/:student_id?tenant_id=`: si está desactivado devuelve `blocked:false` sin más; si está activo, cuenta los `billing_period` **distintos** entre las facturas del alumno con `status='open'` y `due_date` ya vencida (ignora facturas sin `billing_period`, como cargos únicos de matrícula, porque esos no representan "meses" de mora) y compara contra el umbral.
+  - **Portal de Padres** (`ParentStudentPortal.tsx`): al cargar, consulta el estado de bloqueo junto con lo demás. Si está bloqueado, las pestañas "Calificaciones" y "Boletines" muestran un aviso (`TuitionBlockNotice`) con los meses vencidos y un botón directo al Centro de Pagos, en vez del contenido; el Centro de Pagos y el resto de pestañas (agenda, mensajería, contratos, recogida, perfil) siguen accesibles normalmente para que el padre pueda regularizar. El resumen de "Índice Académico" del Dashboard (que también mostraba el GPA) se oculta con el mismo criterio vía un nuevo prop `academicIndexBlocked` en `ParentDashboard.tsx`, para que no quede una puerta trasera al mismo dato.
+  - **Decisión de diseño de alcance**: el bloqueo se aplica solo en el frontend del Portal de Padres (que sí tiene auth real de Fase 2), NO en los endpoints compartidos `GET /api/v1/bulletins/:student_id` ni `GET /api/v1/enrollments/:student_id` — esos los sigue usando sin restricción el Expediente del Alumno del lado Admin (`StudentFile.tsx`) y otros módulos internos, que no deben bloquearse por mora del padre.
+  - Verificado: valor por defecto confirmado en producción (`tuition_block_enabled=false`, `threshold=2`); typecheck limpio; Portal Admin y Portal de Padres sirven HTTP 200 en local tras los cambios.
+
 ## 4. Tarea en curso
 
-Ninguna en este momento. El usuario pidió continuar "todo poco a poco, uno detrás de otro" con los ítems "Core" del roadmap grande (§5.1); CRM de Admisiones y Becas/Descuentos (ver arriba) son los primeros dos. Backlog técnico interno (§5.2) ya resuelto en lo que no estaba bloqueado.
+Ninguna en este momento. El usuario pidió continuar "todo poco a poco, uno detrás de otro" con los ítems "Core" del roadmap grande (§5.1); CRM de Admisiones, Becas/Descuentos y Control de Morosidad (ver arriba) son los primeros tres. Backlog técnico interno (§5.2) ya resuelto en lo que no estaba bloqueado.
 
 Tarea completada justo antes: personal expatriado/honorarios profesionales + primera versión (sin desglose) del acumulado mensual de nómina.
 
@@ -158,7 +165,7 @@ El usuario está pegando, sección por sección, una lista de posibles mejoras p
 **Portal de Padres y Experiencia Familiar**
 - Core:
   - Módulo de Enfermería / Ficha Médica: alergias, medicamentos permitidos, contactos de emergencia; bitácora de visitas a la enfermería con alerta automática por email/app al padre.
-  - Control de Morosidad Restrictivo: si el padre debe más de X meses, el sistema bloquea automáticamente ver calificaciones o descargar el boletín (común en colegios privados). *Nota: hoy Centro de Pagos ya calcula pendiente por cobrar; esto agregaría un bloqueo activo en Notas/Boletín según ese saldo.*
+  - ~~Control de Morosidad Restrictivo~~ **RESUELTO** — ver sección 3/4.
 - Avanzado (diferenciadores):
   - Billetera Virtual / Cafetería (POS): el padre recarga saldo en el portal, el alumno compra en la cafetería con carnet (RFID/QR) sin efectivo.
   - Integración con WhatsApp (API oficial): recordatorios de pago y alertas de inasistencia por WhatsApp en vez de solo correo.

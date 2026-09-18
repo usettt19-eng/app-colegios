@@ -116,6 +116,40 @@ router.patch("/:id/grading-scale", async (req: Request, res: Response) => {
   }
 });
 
+// PATCH /api/v1/tenants/:id/tuition-block
+// Configura el Control de Morosidad Restrictivo: si está activado, un padre
+// con N o más meses de facturas vencidas sin pagar pierde acceso a ver
+// notas/boletines en el Portal de Padres hasta regularizar su situación.
+// Apagado por defecto: es una política que cada colegio decide activar.
+router.patch("/:id/tuition-block", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { tuition_block_enabled, tuition_block_months_threshold } = req.body;
+
+    if (tuition_block_months_threshold !== undefined && Number(tuition_block_months_threshold) < 1) {
+      return res.status(400).json({ error: "El umbral de meses debe ser al menos 1." });
+    }
+
+    const updates: Record<string, any> = {};
+    if (tuition_block_enabled !== undefined) updates.tuition_block_enabled = tuition_block_enabled;
+    if (tuition_block_months_threshold !== undefined) updates.tuition_block_months_threshold = Number(tuition_block_months_threshold);
+
+    const { data: tenant, error } = await supabaseAdmin
+      .from("tenants")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error || !tenant) return res.status(404).json({ error: "Colegio no encontrado." });
+
+    return res.status(200).json({ success: true, message: "Control de morosidad actualizado.", tenant });
+  } catch (error: any) {
+    console.error("Error en PATCH /api/v1/tenants/:id/tuition-block:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // POST /api/v1/tenants/:id/admins
 // El super_admin de la plataforma crea el administrador de un colegio:
 // da de alta su cuenta real en Supabase Auth (vía Admin API) y su perfil,

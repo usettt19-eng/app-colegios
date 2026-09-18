@@ -401,6 +401,51 @@ router.get("/invoices/:student_id", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/v1/finance/tuition-block-status/:student_id?tenant_id=...
+// Consulta si el Portal de Padres debe bloquear notas/boletines por mora,
+// según la política de Control de Morosidad Restrictivo del colegio
+// (Admin > Costos). "Meses vencidos" cuenta los periodos de facturación
+// (billing_period) distintos con al menos una factura status='open' y
+// due_date ya pasada — no cuenta facturas sin billing_period (ej. cargos
+// únicos como matrícula) porque esos no representan "meses" de mora.
+router.get("/tuition-block-status/:student_id", async (req: Request, res: Response) => {
+  try {
+    const { student_id } = req.params;
+    const { tenant_id } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    const { data: tenant } = await supabaseAdmin
+      .from("tenants")
+      .select("tuition_block_enabled, tuition_block_months_threshold")
+      .eq("id", tenant_id)
+      .single();
+
+    const enabled = !!tenant?.tuition_block_enabled;
+    const threshold = tenant?.tuition_block_months_threshold ?? 2;
+
+    if (!enabled) {
+      return res.status(200).json({ success: true, enabled: false, blocked: false, monthsOverdue: 0, threshold });
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+    const { data: overdueInvoices } = await supabaseAdmin
+      .from("invoices")
+      .select("billing_period")
+      .eq("student_id", student_id)
+      .eq("status", "open")
+      .lt("due_date", today)
+      .not("billing_period", "is", null);
+
+    const monthsOverdue = new Set((overdueInvoices || []).map(inv => inv.billing_period)).size;
+    const blocked = monthsOverdue >= threshold;
+
+    return res.status(200).json({ success: true, enabled: true, blocked, monthsOverdue, threshold });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/finance/tuition-block-status/:student_id:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // GET /api/v1/finance/payments/:student_id
 // Lista los comprobantes de pago (recibos) del alumno, para la pestaña "Comprobantes"
 router.get("/payments/:student_id", async (req: Request, res: Response) => {

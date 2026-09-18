@@ -20,6 +20,7 @@ interface Props {
   onGoToPayments: () => void;
   onGoToAgenda: () => void;
   onGoToGrades: () => void;
+  academicIndexBlocked?: boolean;
 }
 
 const fmtRange = (start: string, end: string) => {
@@ -29,7 +30,7 @@ const fmtRange = (start: string, end: string) => {
   return `${s.toLocaleDateString('es', opts)} - ${e.toLocaleDateString('es', opts)}`;
 };
 
-export const ParentDashboard: React.FC<Props> = ({ tenantId, studentId, onGoToPayments, onGoToAgenda, onGoToGrades }) => {
+export const ParentDashboard: React.FC<Props> = ({ tenantId, studentId, onGoToPayments, onGoToAgenda, onGoToGrades, academicIndexBlocked }) => {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -190,7 +191,9 @@ export const ParentDashboard: React.FC<Props> = ({ tenantId, studentId, onGoToPa
               <div className="p-2 rounded-lg bg-blue-100 text-blue-600"><BarChart3 className="w-4 h-4" /></div>
               <h2 className="font-bold text-slate-700">Índice Académico</h2>
             </div>
-            {academic_index.by_term.length === 0 ? (
+            {academicIndexBlocked ? (
+              <p className="text-sm text-rose-500 mb-4">Oculto por mora. Regulariza tu situación en el Centro de Pagos para verlo.</p>
+            ) : academic_index.by_term.length === 0 ? (
               <p className="text-sm text-slate-400 mb-4">Aún no hay boletines publicados.</p>
             ) : (
               <div className="space-y-2 mb-4">
@@ -206,8 +209,8 @@ export const ParentDashboard: React.FC<Props> = ({ tenantId, studentId, onGoToPa
                 </div>
               </div>
             )}
-            <button onClick={onGoToGrades} className="flex items-center text-sm font-semibold text-blue-600 hover:text-blue-800">
-              Ver detalle por materia <ChevronRight className="w-4 h-4 ml-1" />
+            <button onClick={academicIndexBlocked ? onGoToPayments : onGoToGrades} className="flex items-center text-sm font-semibold text-blue-600 hover:text-blue-800">
+              {academicIndexBlocked ? 'Ir al Centro de Pagos' : 'Ver detalle por materia'} <ChevronRight className="w-4 h-4 ml-1" />
             </button>
           </div>
         </div>
