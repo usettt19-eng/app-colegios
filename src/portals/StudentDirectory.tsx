@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Search, Users2, UserPlus, Link2, X, ChevronDown, ChevronUp, Loader2, CheckCircle } from 'lucide-react';
+import { Search, Users2, UserPlus, Link2, X, ChevronDown, ChevronUp, Loader2, CheckCircle, Plus } from 'lucide-react';
 
 interface Guardian {
   relationship: string;
@@ -28,6 +28,7 @@ interface GradeLevel {
   id: string;
   name: string;
   sort_order: number;
+  grade_sections?: { id: string; name: string }[];
 }
 
 interface Props {
@@ -57,6 +58,105 @@ export const StudentDirectory: React.FC<Props> = ({ tenantId }) => {
 
   const [creatingParent, setCreatingParent] = useState(false);
   const [newParentForm, setNewParentForm] = useState({ first_name: '', last_name: '', email: '', password: '' });
+
+  // --- Agregar Alumno (solo lo esencial; el resto lo completa el padre
+  // después desde "Actualización de Datos" en su portal) ---
+  const [showAddStudent, setShowAddStudent] = useState(false);
+  const [addingStudent, setAddingStudent] = useState(false);
+  const [newStudentForm, setNewStudentForm] = useState({ first_name: '', last_name: '' });
+  const [newStudentGradeLevelId, setNewStudentGradeLevelId] = useState('');
+  const [newStudentSectionId, setNewStudentSectionId] = useState('');
+  const [addParentSearch, setAddParentSearch] = useState('');
+  const [addParentSuggestions, setAddParentSuggestions] = useState<ParentSuggestion[]>([]);
+  const [addSelectedParent, setAddSelectedParent] = useState<ParentSuggestion | null>(null);
+  const [addParentRelationship, setAddParentRelationship] = useState('madre');
+  const [addCreatingParent, setAddCreatingParent] = useState(false);
+  const [addNewParentForm, setAddNewParentForm] = useState({ first_name: '', last_name: '', email: '', password: '' });
+
+  const newStudentSections = gradeLevels.find(g => g.id === newStudentGradeLevelId)?.grade_sections || [];
+
+  useEffect(() => {
+    if (!addParentSearch || addSelectedParent) {
+      setAddParentSuggestions([]);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      fetch(`/api/v1/profiles?tenant_id=${tenantId}&role=parent&search=${encodeURIComponent(addParentSearch)}`)
+        .then(r => r.json())
+        .then(d => setAddParentSuggestions(d.profiles || []))
+        .catch(() => {});
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [addParentSearch, addSelectedParent, tenantId]);
+
+  const resetAddStudentForm = () => {
+    setNewStudentForm({ first_name: '', last_name: '' });
+    setNewStudentGradeLevelId('');
+    setNewStudentSectionId('');
+    setAddParentSearch('');
+    setAddParentSuggestions([]);
+    setAddSelectedParent(null);
+    setAddParentRelationship('madre');
+    setAddCreatingParent(false);
+    setAddNewParentForm({ first_name: '', last_name: '', email: '', password: '' });
+  };
+
+  const handleAddStudent = async () => {
+    if (!newStudentForm.first_name || !newStudentForm.last_name) {
+      setMessage('❌ Nombre y apellido son requeridos.');
+      return;
+    }
+    setAddingStudent(true);
+    setMessage('');
+    try {
+      let parentId = addSelectedParent?.id;
+
+      if (!parentId && addCreatingParent) {
+        if (!addNewParentForm.first_name || !addNewParentForm.last_name || !addNewParentForm.email || !addNewParentForm.password) {
+          setMessage('❌ Completa todos los campos del padre nuevo.');
+          setAddingStudent(false);
+          return;
+        }
+        const createRes = await fetch('/api/v1/profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tenant_id: tenantId, role: 'parent', ...addNewParentForm }),
+        });
+        const createData = await createRes.json();
+        if (!createData.success) {
+          setMessage('❌ ' + (createData.error || 'No se pudo crear el padre.'));
+          setAddingStudent(false);
+          return;
+        }
+        parentId = createData.profile.id;
+      }
+
+      const response = await fetch('/api/v1/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          first_name: newStudentForm.first_name,
+          last_name: newStudentForm.last_name,
+          grade_section_id: newStudentSectionId || null,
+          parent_id: parentId || null,
+          relationship: addParentRelationship,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage(`✅ ${newStudentForm.first_name} ${newStudentForm.last_name} agregado(a). El resto de sus datos (salud, contactos, etc.) los completa el padre desde su portal.`);
+        resetAddStudentForm();
+        setShowAddStudent(false);
+        loadStudents();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo crear el alumno.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setAddingStudent(false);
+  };
 
   const loadStudents = async () => {
     setLoading(true);
@@ -228,6 +328,12 @@ export const StudentDirectory: React.FC<Props> = ({ tenantId }) => {
         <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
           <Users2 className="w-4 h-4 text-rose-600" />
           <h2 className="font-bold text-slate-700">Directorio de Alumnos</h2>
+          <button
+            onClick={() => { setShowAddStudent(!showAddStudent); if (showAddStudent) resetAddStudentForm(); }}
+            className="flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-rose-100 text-rose-700 hover:bg-rose-200"
+          >
+            <Plus className="w-3.5 h-3.5 mr-1" /> Agregar Alumno
+          </button>
           <div className="relative flex-1 max-w-xs ml-auto">
             <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
@@ -237,6 +343,128 @@ export const StudentDirectory: React.FC<Props> = ({ tenantId }) => {
             />
           </div>
         </div>
+
+        {showAddStudent && (
+          <div className="p-4 bg-rose-50 border-b border-rose-100 space-y-3">
+            <p className="text-xs text-rose-700">
+              Solo lo esencial. El alumno/padre completa el resto (cédula, salud, contactos de emergencia, etc.)
+              desde "Actualización de Datos" en el Portal de Padres.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input
+                type="text" placeholder="Nombre" value={newStudentForm.first_name}
+                onChange={e => setNewStudentForm({ ...newStudentForm, first_name: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <input
+                type="text" placeholder="Apellido" value={newStudentForm.last_name}
+                onChange={e => setNewStudentForm({ ...newStudentForm, last_name: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <select
+                value={newStudentGradeLevelId}
+                onChange={e => { setNewStudentGradeLevelId(e.target.value); setNewStudentSectionId(''); }}
+                className="border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              >
+                <option value="">Selecciona el grado...</option>
+                {gradeLevels.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+              <select
+                value={newStudentSectionId}
+                onChange={e => setNewStudentSectionId(e.target.value)}
+                disabled={!newStudentGradeLevelId}
+                className="border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 disabled:opacity-50"
+              >
+                <option value="">Selecciona la sección...</option>
+                {newStudentSections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+
+            <div className="bg-white rounded-md border border-slate-200 p-3 space-y-2">
+              <p className="text-xs font-bold text-slate-500">PADRE/MADRE/ACUDIENTE (opcional, se puede vincular después)</p>
+              {addSelectedParent ? (
+                <div className="flex items-center justify-between bg-slate-50 rounded-md border border-rose-200 px-3 py-2">
+                  <span className="text-sm font-semibold text-slate-700">{addSelectedParent.first_name} {addSelectedParent.last_name}</span>
+                  <button onClick={() => setAddSelectedParent(null)} className="text-xs font-bold text-rose-600 hover:text-rose-800">Cambiar</button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text" placeholder="Buscar padre existente..." value={addParentSearch}
+                    onChange={e => setAddParentSearch(e.target.value)}
+                    className="w-full border border-slate-300 rounded-md pl-8 pr-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                  {addParentSuggestions.length > 0 && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                      {addParentSuggestions.map(p => (
+                        <button
+                          key={p.id}
+                          onClick={() => { setAddSelectedParent(p); setAddParentSearch(''); setAddParentSuggestions([]); }}
+                          className="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50"
+                        >
+                          {p.first_name} {p.last_name} <span className="text-slate-400">({p.email})</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center gap-3">
+                <select
+                  value={addParentRelationship}
+                  onChange={e => setAddParentRelationship(e.target.value)}
+                  className="border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                >
+                  {RELATIONSHIPS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+                {!addSelectedParent && (
+                  <button
+                    onClick={() => setAddCreatingParent(!addCreatingParent)}
+                    className="text-xs font-bold text-rose-600 hover:text-rose-800"
+                  >
+                    {addCreatingParent ? 'Cancelar y buscar existente' : 'No está registrado(a): crear nuevo'}
+                  </button>
+                )}
+              </div>
+
+              {!addSelectedParent && addCreatingParent && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="text" placeholder="Nombre" value={addNewParentForm.first_name}
+                    onChange={e => setAddNewParentForm({ ...addNewParentForm, first_name: e.target.value })}
+                    className="border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                  <input
+                    type="text" placeholder="Apellido" value={addNewParentForm.last_name}
+                    onChange={e => setAddNewParentForm({ ...addNewParentForm, last_name: e.target.value })}
+                    className="border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                  <input
+                    type="email" placeholder="Correo electrónico" value={addNewParentForm.email}
+                    onChange={e => setAddNewParentForm({ ...addNewParentForm, email: e.target.value })}
+                    className="border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                  <input
+                    type="text" placeholder="Contraseña temporal" value={addNewParentForm.password}
+                    onChange={e => setAddNewParentForm({ ...addNewParentForm, password: e.target.value })}
+                    className="border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={handleAddStudent}
+              disabled={addingStudent}
+              className="flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50 font-semibold text-sm"
+            >
+              {addingStudent ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+              Crear Alumno
+            </button>
+          </div>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-12 text-slate-400">
