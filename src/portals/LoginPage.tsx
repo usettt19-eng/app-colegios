@@ -3,11 +3,17 @@ import { GraduationCap, Loader2, LogIn, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export const LoginPage: React.FC = () => {
-  const { signIn } = useAuth();
+  const { signIn, error: contextError } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // El error puede venir del signIn (credenciales inválidas) o, si el login
+  // sí funcionó pero luego falla la carga del perfil (GET /api/v1/auth/me),
+  // del propio AuthContext — de lo contrario ese segundo caso quedaba
+  // silencioso y la pantalla de login volvía a aparecer sin explicación.
+  const visibleError = error || contextError;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,9 +35,9 @@ export const LoginPage: React.FC = () => {
           <p className="text-xs text-slate-500">Inicia sesión con tu cuenta</p>
         </div>
 
-        {error && (
+        {visibleError && (
           <div className="bg-rose-50 border border-rose-200 text-rose-700 rounded-lg p-3 text-sm flex items-start">
-            <AlertTriangle className="w-4 h-4 mr-2 flex-shrink-0 mt-0.5" /> {error}
+            <AlertTriangle className="w-4 h-4 mr-2 flex-shrink-0 mt-0.5" /> {visibleError}
           </div>
         )}
 
