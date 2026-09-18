@@ -23,6 +23,17 @@ interface ParentRow {
   family_code?: string;
 }
 
+interface StaffRow {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string;
+  cedula?: string;
+  role?: string;
+}
+
+const VALID_STAFF_ROLES = new Set(["teacher", "admin", "guard"]);
+
 // POST /api/v1/bulk-import/students
 // Carga masiva de alumnos desde la base de datos de un colegio ya en
 // operación (CSV exportado por el sistema anterior). Cada fila trae su
@@ -183,6 +194,84 @@ router.post("/parents", async (req: Request, res: Response) => {
     return res.status(200).json({ success: true, created, reused, linked, total: rows.length, errors });
   } catch (error: any) {
     console.error("Error en POST /api/v1/bulk-import/parents:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/bulk-import/staff
+// Carga masiva de docentes/staff. Por cada fila crea (o reutiliza, si el
+// email ya existe) la cuenta real de acceso con el rol indicado.
+router.post("/staff", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, rows, default_password } = req.body as { tenant_id: string; rows: StaffRow[]; default_password?: string };
+    if (!tenant_id || !Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, rows)" });
+    }
+
+    let created = 0;
+    let reused = 0;
+    const errors: { row: number; reason: string }[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row.first_name || !row.last_name || !row.email) {
+        errors.push({ row: i + 1, reason: "Falta nombre, apellido o email." });
+        continue;
+      }
+
+      const role = VALID_STAFF_ROLES.has(row.role || "") ? row.role! : "teacher";
+
+      const { data: existing } = await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .eq("tenant_id", tenant_id)
+        .eq("email", row.email)
+        .maybeSingle();
+
+      if (existing) {
+        reused++;
+        await supabaseAdmin
+          .from("profiles")
+          .update({ role, cedula: row.cedula || undefined, phone: row.phone || undefined })
+          .eq("id", existing.id);
+        continue;
+      }
+
+      const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
+        email: row.email,
+        password: default_password || `Cambiar123!`,
+        email_confirm: true,
+        user_metadata: { first_name: row.first_name, last_name: row.last_name, role },
+      });
+
+      if (authError || !authUser?.user) {
+        errors.push({ row: i + 1, reason: authError?.message || "No se pudo crear la cuenta." });
+        continue;
+      }
+
+      const { error: profileError } = await supabaseAdmin.from("profiles").insert({
+        id: authUser.user.id,
+        tenant_id,
+        role,
+        first_name: row.first_name,
+        last_name: row.last_name,
+        email: row.email,
+        phone: row.phone || null,
+        cedula: row.cedula || null,
+      });
+
+      if (profileError) {
+        errors.push({ row: i + 1, reason: profileError.message });
+        await supabaseAdmin.auth.admin.deleteUser(authUser.user.id);
+        continue;
+      }
+
+      created++;
+    }
+
+    return res.status(200).json({ success: true, created, reused, total: rows.length, errors });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/bulk-import/staff:", error);
     return res.status(500).json({ error: "Error interno" });
   }
 });
