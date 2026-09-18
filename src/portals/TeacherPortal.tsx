@@ -1,10 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Calendar, CheckSquare, AlertTriangle, Send, BookOpen, Plus, Loader2, ClipboardCheck, GraduationCap, MessageSquare, Award } from 'lucide-react';
 import { MessagingInbox } from './MessagingInbox';
-
-// Contexto de demostración: en producción estos IDs vienen del token JWT de Supabase Auth (Fase 2)
-const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
-const DEMO_TEACHER_ID = '44444444-4444-4444-4444-444444444444';
+import { useAuth } from '../contexts/AuthContext';
+import { LoginPage } from './LoginPage';
 
 type TabId = 'attendance' | 'assignments' | 'grades' | 'messages';
 
@@ -48,7 +46,16 @@ interface Submission {
   students?: { first_name: string; last_name: string };
 }
 
-export const TeacherPortal: React.FC = () => {
+interface InnerProps {
+  tenantId: string;
+  teacherId: string;
+  teacherName: string;
+  onSignOut: () => void;
+}
+
+const TeacherPortalInner: React.FC<InnerProps> = ({ tenantId, teacherId, teacherName, onSignOut }) => {
+  const DEMO_TENANT_ID = tenantId;
+  const DEMO_TEACHER_ID = teacherId;
   const [activeTab, setActiveTab] = useState<TabId>('attendance');
   const [classes, setClasses] = useState<ClassGroup[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
@@ -321,6 +328,15 @@ export const TeacherPortal: React.FC = () => {
             </select>
           )}
           <span className="flex items-center text-sm text-gray-600"><Calendar className="w-4 h-4 mr-1" /> {new Date().toLocaleDateString()}</span>
+          <div className="text-right hidden sm:block">
+            <p className="text-sm font-bold text-gray-700">{teacherName}</p>
+          </div>
+          <button
+            onClick={onSignOut}
+            className="px-3 py-2 text-sm font-semibold text-gray-500 hover:bg-gray-100 rounded-md border border-gray-200"
+          >
+            Cerrar Sesión
+          </button>
         </div>
       </div>
 
@@ -606,5 +622,41 @@ export const TeacherPortal: React.FC = () => {
         <MessagingInbox tenantId={DEMO_TENANT_ID} profileId={DEMO_TEACHER_ID} recipientRole="parent" />
       )}
     </div>
+  );
+};
+
+export const TeacherPortal: React.FC = () => {
+  const { session, profile, loading, signOut } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-24 text-slate-400">
+        <Loader2 className="w-6 h-6 mr-2 animate-spin" /> Verificando sesión...
+      </div>
+    );
+  }
+
+  if (!session || !profile) return <LoginPage />;
+
+  if (profile.role !== 'teacher') {
+    return (
+      <div className="p-6 max-w-md mx-auto text-center">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-sm text-amber-800">
+          Esta cuenta ({profile.email}) no tiene el rol de docente, así que no puede ver el Portal del Docente.
+        </div>
+        <button onClick={signOut} className="mt-4 px-4 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 rounded-md border border-slate-200">
+          Cerrar Sesión
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <TeacherPortalInner
+      tenantId={profile.tenant_id}
+      teacherId={profile.id}
+      teacherName={`${profile.first_name} ${profile.last_name}`}
+      onSignOut={signOut}
+    />
   );
 };

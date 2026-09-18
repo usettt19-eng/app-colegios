@@ -69,6 +69,7 @@ export const LoginPage: React.FC = () => {
 
         <p className="text-[11px] text-slate-400 text-center">
           Cuenta demo (padre): padre.demo@colegiodemo.edu / Demo1234!<br />
+          Cuenta demo (docente): profesora.demo@colegiodemo.edu / Demo1234!<br />
           Cuenta demo (super admin): superadmin.demo@plataforma.edu / Demo1234!
         </p>
       </div>
