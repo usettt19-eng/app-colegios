@@ -227,6 +227,146 @@ router.post("/purchase-orders/:id/confirm-payment", async (req: Request, res: Re
 });
 
 // ==========================================
+// GASTOS RECURRENTES MENSUALES (ENERGÍA, AGUA, INTERNET, ETC.)
+// ==========================================
+// No necesitan una cotización nueva cada mes: se configuran una vez y
+// cada periodo se "genera" el cargo correspondiente, que entra al mismo
+// flujo de aprobación/programación/pago que cualquier orden de compra.
+
+// GET /api/v1/corporate/recurring-expenses?tenant_id=...
+router.get("/recurring-expenses", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    const { data, error } = await supabaseAdmin
+      .from("recurring_expenses")
+      .select("*, vendors(name, service_type)")
+      .eq("tenant_id", tenant_id)
+      .order("concept");
+
+    if (error) return res.status(500).json({ error: "Error al consultar los gastos recurrentes." });
+    return res.status(200).json({ success: true, recurringExpenses: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/corporate/recurring-expenses:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/corporate/recurring-expenses
+// Configura un gasto fijo mensual a un proveedor (ej. "Energía eléctrica" con ENSA)
+router.post("/recurring-expenses", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, vendor_id, concept, estimated_amount, due_day } = req.body;
+    if (!tenant_id || !vendor_id || !concept || estimated_amount === undefined) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, vendor_id, concept, estimated_amount)" });
+    }
+
+    const { data: recurringExpense, error } = await supabaseAdmin
+      .from("recurring_expenses")
+      .insert({ tenant_id, vendor_id, concept, estimated_amount, due_day: due_day || 5 })
+      .select()
+      .single();
+
+    if (error || !recurringExpense) {
+      console.error("Error al crear el gasto recurrente:", error);
+      return res.status(500).json({ error: "Error al configurar el gasto recurrente." });
+    }
+
+    return res.status(201).json({ success: true, message: "Gasto recurrente configurado.", recurringExpense });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/corporate/recurring-expenses:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// PATCH /api/v1/corporate/recurring-expenses/:id
+// Edita el monto estimado o desactiva un gasto recurrente (ej. se canceló el servicio)
+router.patch("/recurring-expenses/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { estimated_amount, due_day, is_active } = req.body;
+
+    const updates: Record<string, any> = {};
+    if (estimated_amount !== undefined) updates.estimated_amount = estimated_amount;
+    if (due_day !== undefined) updates.due_day = due_day;
+    if (is_active !== undefined) updates.is_active = is_active;
+
+    const { data: recurringExpense, error } = await supabaseAdmin
+      .from("recurring_expenses")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error || !recurringExpense) return res.status(404).json({ error: "Gasto recurrente no encontrado." });
+
+    return res.status(200).json({ success: true, message: "Gasto recurrente actualizado.", recurringExpense });
+  } catch (error: any) {
+    console.error("Error en PATCH /api/v1/corporate/recurring-expenses/:id:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/corporate/recurring-expenses/:id/generate
+// Genera el cargo (orden de compra) de un gasto recurrente para un periodo
+// dado (ej. "2026-09"). El monto se puede ajustar al monto real de la
+// factura del proveedor (por eso "amount" es opcional, si no se manda usa
+// el estimado). No se puede generar dos veces el mismo periodo.
+router.post("/recurring-expenses/:id/generate", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { tenant_id, billing_period, amount, requested_by } = req.body;
+    if (!tenant_id || !billing_period) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, billing_period)" });
+    }
+
+    const { data: recurringExpense } = await supabaseAdmin
+      .from("recurring_expenses")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (!recurringExpense) return res.status(404).json({ error: "Gasto recurrente no encontrado." });
+
+    const { data: purchaseOrder, error } = await supabaseAdmin
+      .from("purchase_orders")
+      .insert({
+        tenant_id,
+        vendor_id: recurringExpense.vendor_id,
+        requested_by: requested_by || null,
+        total_cost: amount !== undefined ? amount : recurringExpense.estimated_amount,
+        status: "pending_approval",
+        quote_title: `${recurringExpense.concept} - ${billing_period}`,
+        recurring_expense_id: id,
+        billing_period,
+      })
+      .select()
+      .single();
+
+    if (error || !purchaseOrder) {
+      console.error("Error al generar el cargo recurrente:", error);
+      if (error?.code === "23505") {
+        return res.status(400).json({ error: `Ya se generó el cargo de "${recurringExpense.concept}" para ${billing_period}.` });
+      }
+      return res.status(500).json({ error: "Error al generar el cargo." });
+    }
+
+    await supabaseAdmin.from("audit_logs").insert({
+      tenant_id,
+      event_type: "FINANCE",
+      description: `Se generó el cargo mensual de "${recurringExpense.concept}" (${billing_period}) por $${purchaseOrder.total_cost}.`,
+      actor_name: "Finance System",
+    });
+
+    return res.status(201).json({ success: true, message: "Cargo generado, pendiente de aprobación.", purchaseOrder });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/corporate/recurring-expenses/:id/generate:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// ==========================================
 // MÓDULO DE ACTIVOS FIJOS (COMPUTADORAS/PATRIMONIO)
 // ==========================================
 

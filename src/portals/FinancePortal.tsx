@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { DollarSign, TrendingUp, TrendingDown, Wallet, Loader2, Plus, FileUp, CalendarClock, CheckCircle2, Landmark } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Wallet, Loader2, Plus, FileUp, CalendarClock, CheckCircle2, Landmark, Repeat } from 'lucide-react';
 
 // Contexto de demostración: en producción tenant_id / profile_id vienen del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -7,6 +7,12 @@ const DEMO_ACTOR_ID = '66666666-6666-6666-6666-666666666666';
 
 function readFileName(file: File): string {
   return file.name;
+}
+
+// Periodo actual en formato "YYYY-MM", igual al que usa Colecturía para las facturas de alumnos
+function currentBillingPeriod(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
 interface CashflowTotals {
@@ -42,8 +48,19 @@ interface PurchaseOrder {
   quote_title: string | null;
   quote_file_url: string | null;
   scheduled_payment_date: string | null;
+  recurring_expense_id: string | null;
+  billing_period: string | null;
   vendors?: { name: string; service_type: string | null };
   profiles?: { first_name: string; last_name: string } | null;
+}
+
+interface RecurringExpense {
+  id: string;
+  concept: string;
+  estimated_amount: number;
+  due_day: number;
+  is_active: boolean;
+  vendors?: { name: string; service_type: string | null };
 }
 
 type TabId = 'flujo' | 'cotizaciones' | 'programar';
@@ -69,6 +86,11 @@ export const FinancePortal: React.FC = () => {
   const [poForm, setPoForm] = useState({ vendor_id: '', total_cost: '', quote_title: '' });
   const [quoteFileName, setQuoteFileName] = useState('');
 
+  // --- Gastos Recurrentes Mensuales (energía, agua, internet...) ---
+  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
+  const [recurringForm, setRecurringForm] = useState({ vendor_id: '', concept: '', estimated_amount: '', due_day: '5' });
+  const [generateAmountByRE, setGenerateAmountByRE] = useState<Record<string, string>>({});
+
   // --- Programar Pagos ---
   const [scheduleDateByPO, setScheduleDateByPO] = useState<Record<string, string>>({});
 
@@ -86,14 +108,17 @@ export const FinancePortal: React.FC = () => {
 
   const loadProcurement = async () => {
     try {
-      const [vendorsRes, poRes] = await Promise.all([
+      const [vendorsRes, poRes, recurringRes] = await Promise.all([
         fetch(`/api/v1/corporate/vendors?tenant_id=${DEMO_TENANT_ID}`),
         fetch(`/api/v1/corporate/purchase-orders?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/corporate/recurring-expenses?tenant_id=${DEMO_TENANT_ID}`),
       ]);
       const vendorsData = await vendorsRes.json();
       const poData = await poRes.json();
+      const recurringData = await recurringRes.json();
       setVendors(vendorsData.vendors || []);
       setPurchaseOrders(poData.purchaseOrders || []);
+      setRecurringExpenses(recurringData.recurringExpenses || []);
     } catch {
       setMessage('❌ No se pudo conectar con el servidor SIS.');
     }
@@ -103,6 +128,65 @@ export const FinancePortal: React.FC = () => {
     if (activeTab === 'flujo') loadCashflow();
     if (activeTab === 'cotizaciones' || activeTab === 'programar') loadProcurement();
   }, [activeTab]);
+
+  const handleCreateRecurringExpense = async () => {
+    if (!recurringForm.vendor_id || !recurringForm.concept || !recurringForm.estimated_amount) {
+      setMessage('❌ Selecciona el proveedor, el concepto y el monto estimado.');
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/corporate/recurring-expenses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          vendor_id: recurringForm.vendor_id,
+          concept: recurringForm.concept,
+          estimated_amount: Number(recurringForm.estimated_amount),
+          due_day: Number(recurringForm.due_day),
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Gasto recurrente configurado.');
+        setRecurringForm({ vendor_id: '', concept: '', estimated_amount: '', due_day: '5' });
+        loadProcurement();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo configurar el gasto recurrente.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setLoading(false);
+  };
+
+  const handleGenerateRecurringCharge = async (re: RecurringExpense) => {
+    setMessage('');
+    try {
+      const amount = generateAmountByRE[re.id];
+      const response = await fetch(`/api/v1/corporate/recurring-expenses/${re.id}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          billing_period: currentBillingPeriod(),
+          amount: amount ? Number(amount) : undefined,
+          requested_by: DEMO_ACTOR_ID,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage(`✅ Cargo de "${re.concept}" generado para ${currentBillingPeriod()}, pendiente de aprobación.`);
+        loadProcurement();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo generar el cargo.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
 
   const handleCreateQuote = async () => {
     if (!poForm.vendor_id || !poForm.total_cost || !quoteFileName) {
@@ -325,6 +409,82 @@ export const FinancePortal: React.FC = () => {
       {/* Cotizaciones y Compras */}
       {activeTab === 'cotizaciones' && (
         <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <h2 className="font-bold text-slate-700 flex items-center"><Repeat className="w-4 h-4 mr-2 text-green-600" /> Gastos Recurrentes Mensuales</h2>
+            <p className="text-sm text-slate-500">
+              Para gastos fijos como energía, agua o internet no hace falta subir una cotización cada mes: configúralos una vez y genera el cargo del periodo con un clic (puedes ajustar el monto si la factura real varió).
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <select
+                value={recurringForm.vendor_id}
+                onChange={e => setRecurringForm({ ...recurringForm, vendor_id: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                <option value="">Proveedor</option>
+                {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+              <input
+                type="text" placeholder="Concepto (ej. Energía eléctrica)" value={recurringForm.concept}
+                onChange={e => setRecurringForm({ ...recurringForm, concept: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+              <input
+                type="number" placeholder="Monto estimado" value={recurringForm.estimated_amount}
+                onChange={e => setRecurringForm({ ...recurringForm, estimated_amount: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+              <input
+                type="number" placeholder="Día de pago" value={recurringForm.due_day} min={1} max={28}
+                onChange={e => setRecurringForm({ ...recurringForm, due_day: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <button
+              onClick={handleCreateRecurringExpense}
+              disabled={loading}
+              className="flex items-center px-4 py-2 bg-slate-700 text-white rounded-md hover:bg-slate-800 disabled:opacity-50 font-semibold"
+            >
+              {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+              Configurar Gasto Recurrente
+            </button>
+
+            {recurringExpenses.filter(re => re.is_active).length === 0 ? (
+              <p className="text-sm text-slate-400">Aún no hay gastos recurrentes configurados.</p>
+            ) : (
+              <div className="divide-y divide-slate-100 border-t border-slate-100 pt-2">
+                {recurringExpenses.filter(re => re.is_active).map(re => {
+                  const alreadyGenerated = purchaseOrders.some(po => po.recurring_expense_id === re.id && po.billing_period === currentBillingPeriod());
+                  return (
+                    <div key={re.id} className="py-3 flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="font-semibold text-slate-700">{re.concept}</p>
+                        <p className="text-xs text-slate-400">{re.vendors?.name} — estimado ${Number(re.estimated_amount).toFixed(2)} — día {re.due_day}</p>
+                      </div>
+                      {alreadyGenerated ? (
+                        <span className="text-xs font-bold text-emerald-600">✓ Ya generado para {currentBillingPeriod()}</span>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number" placeholder={String(re.estimated_amount)}
+                            value={generateAmountByRE[re.id] ?? ''}
+                            onChange={e => setGenerateAmountByRE({ ...generateAmountByRE, [re.id]: e.target.value })}
+                            className="w-28 border border-slate-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                          />
+                          <button
+                            onClick={() => handleGenerateRecurringCharge(re)}
+                            className="text-xs font-bold text-white bg-green-600 hover:bg-green-700 px-3 py-1.5 rounded"
+                          >
+                            Generar cargo de {currentBillingPeriod()}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
             <h2 className="font-bold text-slate-700 flex items-center"><FileUp className="w-4 h-4 mr-2 text-green-600" /> Subir Cotización</h2>
             <p className="text-sm text-slate-500">
