@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Calendar, CheckSquare, AlertTriangle, Send, BookOpen, Plus, Loader2, ClipboardCheck, GraduationCap, MessageSquare, Award, FolderOpen } from 'lucide-react';
+import { Calendar, CheckSquare, AlertTriangle, Send, BookOpen, Plus, Loader2, ClipboardCheck, GraduationCap, MessageSquare, Award, FolderOpen, X } from 'lucide-react';
 import { MessagingInbox } from './MessagingInbox';
 import { StaffDocuments } from './StaffDocuments';
 import { useAuth } from '../contexts/AuthContext';
@@ -37,6 +37,13 @@ interface Assignment {
   title: string;
   due_date: string;
   max_score: number;
+}
+
+interface RubricCriterion {
+  id: string;
+  name: string;
+  max_points: number;
+  sort_order: number;
 }
 
 interface GradingPeriod {
@@ -88,6 +95,12 @@ const TeacherPortalInner: React.FC<InnerProps> = ({ tenantId, teacherId, teacher
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [assignmentForm, setAssignmentForm] = useState({ title: '', description: '', due_date: '', max_score: '100', type: 'tarea', grading_period_id: '' });
   const [scoreDrafts, setScoreDrafts] = useState<Record<string, string>>({});
+
+  // --- Rúbrica de Evaluación (por tarea) ---
+  const [rubricCriteria, setRubricCriteria] = useState<RubricCriterion[]>([]);
+  const [newCriterionForm, setNewCriterionForm] = useState({ name: '', max_points: '' });
+  const [rubricScoreDrafts, setRubricScoreDrafts] = useState<Record<string, Record<string, string>>>({});
+  const [rubricLoading, setRubricLoading] = useState(false);
 
   // --- Plan de Evaluación y Notas por Período ---
   const [gradingPeriods, setGradingPeriods] = useState<GradingPeriod[]>([]);
@@ -394,12 +407,89 @@ const TeacherPortalInner: React.FC<InnerProps> = ({ tenantId, teacherId, teacher
   const handleViewSubmissions = async (assignmentId: string) => {
     setSelectedAssignmentId(assignmentId);
     try {
-      const response = await fetch(`/api/v1/assignments/${assignmentId}/submissions`);
-      const data = await response.json();
+      const [submissionsRes, rubricRes] = await Promise.all([
+        fetch(`/api/v1/assignments/${assignmentId}/submissions`),
+        fetch(`/api/v1/assignments/${assignmentId}/rubric`),
+      ]);
+      const data = await submissionsRes.json();
+      const rubricData = await rubricRes.json();
       setSubmissions(data.submissions || []);
+      setRubricCriteria(rubricData.criteria || []);
     } catch {
       setMessage('❌ No se pudieron cargar las entregas.');
     }
+  };
+
+  const handleAddCriterion = async () => {
+    if (!newCriterionForm.name || !newCriterionForm.max_points) {
+      setMessage('❌ Indica el nombre y el puntaje máximo del criterio.');
+      return;
+    }
+    setRubricLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/assignments/${selectedAssignmentId}/rubric`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID, name: newCriterionForm.name, max_points: Number(newCriterionForm.max_points),
+          sort_order: rubricCriteria.length,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setNewCriterionForm({ name: '', max_points: '' });
+        handleViewSubmissions(selectedAssignmentId);
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo agregar el criterio.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setRubricLoading(false);
+  };
+
+  const handleDeleteCriterion = async (criterionId: string) => {
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/assignments/rubric/${criterionId}`, { method: 'DELETE' });
+      const data = await response.json();
+      if (data.success) {
+        setRubricCriteria(prev => prev.filter(c => c.id !== criterionId));
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo eliminar el criterio.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
+  const handleGradeWithRubric = async (studentAssignmentId: string) => {
+    const drafts = rubricScoreDrafts[studentAssignmentId] || {};
+    const scores = rubricCriteria.map(c => ({ criterion_id: c.id, points: Number(drafts[c.id] || 0) }));
+    if (scores.every(s => !drafts[s.criterion_id])) {
+      setMessage('❌ Indica al menos un puntaje de la rúbrica antes de guardar.');
+      return;
+    }
+    setIsSubmitting(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/assignments/grade-rubric', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ student_assignment_id: studentAssignmentId, teacher_id: DEMO_TEACHER_ID, scores }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage(`✅ Calificación guardada con rúbrica: ${data.totalScore} puntos.`);
+        handleViewSubmissions(selectedAssignmentId);
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo calificar.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setIsSubmitting(false);
   };
 
   const handleGrade = async (studentAssignmentId: string) => {
@@ -677,35 +767,94 @@ const TeacherPortalInner: React.FC<InnerProps> = ({ tenantId, teacherId, teacher
 
           {selectedAssignmentId && (
             <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-              <div className="p-4 bg-gray-50 border-b border-gray-100">
-                <h2 className="font-semibold text-gray-800">Entregas y Calificaciones</h2>
+              <div className="p-4 bg-gray-50 border-b border-gray-100 space-y-3">
+                <h2 className="font-semibold text-gray-800 flex items-center"><Award className="w-4 h-4 mr-2 text-indigo-600" /> Rúbrica de Evaluación (opcional)</h2>
+                <p className="text-xs text-gray-400">Si defines criterios, calificas por rúbrica y la nota final se calcula sola sumando los puntos. Si no defines ninguno, calificas con un solo número como antes.</p>
+                {rubricCriteria.length > 0 && (
+                  <div className="space-y-1">
+                    {rubricCriteria.map(c => (
+                      <div key={c.id} className="flex items-center justify-between bg-white rounded-md border border-gray-200 px-3 py-1.5 text-sm">
+                        <span className="text-gray-600">{c.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-gray-700">{c.max_points} pts</span>
+                          <button onClick={() => handleDeleteCriterion(c.id)} className="text-rose-500 hover:text-rose-700">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text" placeholder="Nombre del criterio (ej. Contenido)" value={newCriterionForm.name}
+                    onChange={e => setNewCriterionForm({ ...newCriterionForm, name: e.target.value })}
+                    className="flex-1 border border-gray-300 rounded-md px-2 py-1.5 text-sm"
+                  />
+                  <input
+                    type="number" placeholder="Pts" value={newCriterionForm.max_points}
+                    onChange={e => setNewCriterionForm({ ...newCriterionForm, max_points: e.target.value })}
+                    className="w-20 border border-gray-300 rounded-md px-2 py-1.5 text-sm"
+                  />
+                  <button
+                    onClick={handleAddCriterion}
+                    disabled={rubricLoading}
+                    className="text-indigo-600 font-bold hover:text-indigo-800 bg-indigo-50 px-3 py-1.5 rounded text-sm disabled:opacity-50 whitespace-nowrap"
+                  >
+                    Agregar
+                  </button>
+                </div>
               </div>
               {submissions.length === 0 ? (
                 <p className="p-6 text-sm text-gray-400">No hay entregas registradas para esta tarea.</p>
               ) : (
                 <div className="divide-y divide-gray-100">
                   {submissions.map(s => (
-                    <div key={s.id} className="p-4 flex items-center justify-between">
+                    <div key={s.id} className="p-4 flex items-center justify-between flex-wrap gap-3">
                       <div>
                         <p className="font-medium text-gray-800">{s.students?.first_name} {s.students?.last_name}</p>
                         <p className="text-xs text-gray-500">
                           Estado: {s.status} {s.score !== null && `· Nota actual: ${s.score}`}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number" placeholder="Nota" defaultValue={s.score ?? ''}
-                          onChange={e => setScoreDrafts({ ...scoreDrafts, [s.id]: e.target.value })}
-                          className="w-20 border border-gray-300 rounded-md px-2 py-1 text-sm"
-                        />
-                        <button
-                          onClick={() => handleGrade(s.id)}
-                          disabled={isSubmitting}
-                          className="text-indigo-600 font-bold hover:text-indigo-800 bg-indigo-50 px-3 py-1 rounded text-sm disabled:opacity-50"
-                        >
-                          Guardar
-                        </button>
-                      </div>
+                      {rubricCriteria.length > 0 ? (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {rubricCriteria.map(c => (
+                            <input
+                              key={c.id}
+                              type="number" placeholder={c.name} max={c.max_points} title={`${c.name} (máx ${c.max_points})`}
+                              value={rubricScoreDrafts[s.id]?.[c.id] || ''}
+                              onChange={e => setRubricScoreDrafts({
+                                ...rubricScoreDrafts,
+                                [s.id]: { ...(rubricScoreDrafts[s.id] || {}), [c.id]: e.target.value },
+                              })}
+                              className="w-16 border border-gray-300 rounded-md px-2 py-1 text-sm"
+                            />
+                          ))}
+                          <button
+                            onClick={() => handleGradeWithRubric(s.id)}
+                            disabled={isSubmitting}
+                            className="text-indigo-600 font-bold hover:text-indigo-800 bg-indigo-50 px-3 py-1 rounded text-sm disabled:opacity-50"
+                          >
+                            Guardar
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number" placeholder="Nota" defaultValue={s.score ?? ''}
+                            onChange={e => setScoreDrafts({ ...scoreDrafts, [s.id]: e.target.value })}
+                            className="w-20 border border-gray-300 rounded-md px-2 py-1 text-sm"
+                          />
+                          <button
+                            onClick={() => handleGrade(s.id)}
+                            disabled={isSubmitting}
+                            className="text-indigo-600 font-bold hover:text-indigo-800 bg-indigo-50 px-3 py-1 rounded text-sm disabled:opacity-50"
+                          >
+                            Guardar
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

@@ -2,7 +2,7 @@
 
 > Documento vivo. Actualízalo cada vez que se cierre o se abra una tarea importante.
 > Regla operativa: cada vez que Claude avance en algo, actualiza este archivo en el mismo commit. Para retomar contexto del proyecto, leer este archivo primero — no releer toda la sesión.
-> Última actualización: 2026-09-18 (Avanzados de RRHH y Finanzas: espacios, evaluación 360°, presupuesto, conciliación bancaria)
+> Última actualización: 2026-09-18 (Académico avanzado: rúbricas + Alerta Temprana)
 
 ## 1. Qué es esto
 
@@ -145,9 +145,15 @@ Cada tabla tiene `tenant_id` (modelo multi-tenant). El repo vive en GitHub, rama
   - **Integración Bancaria (reconciliación automática)**: nuevo `POST /api/v1/finance/bank-reconciliation` — recibe las filas de un extracto bancario (CSV subido y parseado en el cliente, columnas `fecha, monto, referencia, descripcion`) e intenta hacer match automático buscando una factura cuyo `invoice_number` sea igual a la `referencia` de la transferencia (lo que el padre normalmente escribe al transferir). Si coincide número Y monto, concilia solo: crea el `payments` y marca la factura `paid`. Si el número coincide pero el monto no, o si ninguna factura coincide, lo deja en listas separadas ("monto no coincide" / "sin factura coincidente") para revisión manual **en vez de adivinar** — mismo criterio de no inventar reglas de negocio que el resto de la sesión. Nueva pestaña "Conciliación Bancaria" en el Portal de Finanzas con las 3 listas de resultado.
   - Verificado: FKs de `teacher_evaluations` (2 relaciones a `profiles`: `teacher_id`, `evaluator_profile_id`) desambiguadas explícitamente; insert/delete de prueba de `facilities` contra producción; typecheck limpio; Portal ERP y Portal de Finanzas sirven HTTP 200 en local tras los cambios.
 
+- **Académico avanzado** (el usuario pidió "sigue con académico avanzado"): de los 3 ítems de esa sección, 2 se construyeron y 1 quedó explícitamente bloqueado (mismo motivo que SafeSmartPickup: falta que el usuario dé credenciales de una API externa real).
+  - **Rúbricas de Evaluación**: nuevas tablas `assignment_rubric_criteria` (criterios por tarea: nombre + puntaje máximo) y `student_assignment_rubric_scores` (puntaje por criterio y entrega). En el Portal Docente, dentro de "Entregas y Calificaciones" de cada tarea, el docente puede definir criterios opcionales (ej. "Contenido" 40pts, "Presentación" 20pts); si los define, calificar cambia de un solo número a un input por criterio y la nota final se calcula sola (suma). Si no define ninguno, sigue funcionando exactamente como antes (un solo número) — **no se rompió el flujo existente**, se extendió. Backend: `GET/POST /api/v1/assignments/:id/rubric`, `DELETE /api/v1/assignments/rubric/:criterionId`, `POST /api/v1/assignments/grade-rubric`.
+  - **Analítica Predictiva (Alerta Temprana)**: nuevo `GET /api/v1/attendance/risk-dashboard` y pestaña "Alerta Temprana" en Admin. Cruza **tres señales que ya existían en el sistema, sin inventar ningún umbral nuevo**: (1) 3+ ausencias acumuladas — el mismo umbral que ya dispara la alerta `CRITICAL_ABSENCE_STREAK`/SMS de Twilio construida en una sesión anterior; (2) al menos una nota de período por debajo de `tenants.passing_grade` (la nota de aprobación que el propio colegio configuró); (3) alertas activas sin resolver en `student_alerts` (cualquier tipo). Riesgo "alto" = 2+ señales, "medio" = 1 señal — mostrado en una tabla filtrable por nivel, ordenada por riesgo.
+  - **LMS (Google Classroom/Microsoft Teams) — NO se tocó, documentado como bloqueado**: se revisó `backend/routes/lms.ts` y resultó ser una integración **simulada desde antes de esta sesión** (`lmsGradesMock` hardcodeado en el código, con un comentario explícito de que en producción haría un fetch real a Canvas/Google Classroom). Una integración real requiere credenciales OAuth de una cuenta de Google Workspace/Microsoft del colegio que el usuario tendría que proveer — mismo tipo de bloqueo ya documentado para SafeSmartPickup en el backlog. No se intentó profundizar el mock ni fingir una integración real.
+  - Verificado: FKs de las tablas de rúbrica sin ambigüedad; query de riesgo replicada y confirmada contra producción (`execute_sql` directo); typecheck limpio; Portal Admin y Portal Docente sirven HTTP 200 en local tras los cambios.
+
 ## 4. Tarea en curso
 
-Ninguna en este momento. Con esto quedan completos TODOS los ítems "Core" y los de RRHH/Finanzas "Avanzado" del roadmap grande (§5.1). Quedan pendientes (no iniciados): Académico avanzado (LMS, rúbricas, analítica predictiva), Admisiones avanzado (examen en línea, firma electrónica), Padres avanzado (billetera/POS cafetería, WhatsApp, geolocalización de buses), y Arquitectura (PWA, API pública, auditoría ampliada). Backlog técnico interno (§5.2) ya resuelto en lo que no estaba bloqueado.
+Ninguna en este momento. Con esto quedan completos TODOS los ítems "Core" de todo el roadmap y los "Avanzado" de RRHH, Finanzas y Académico (excepto LMS real, bloqueado por credenciales). Quedan pendientes (no iniciados): Admisiones avanzado (examen en línea, firma electrónica), Padres avanzado (billetera/POS cafetería, WhatsApp, geolocalización de buses), y Arquitectura (PWA, API pública, auditoría ampliada). Backlog técnico interno (§5.2) ya resuelto en lo que no estaba bloqueado.
 
 Tarea completada justo antes: personal expatriado/honorarios profesionales + primera versión (sin desglose) del acumulado mensual de nómina.
 
@@ -169,9 +175,9 @@ El usuario está pegando, sección por sección, una lista de posibles mejoras p
   - Módulo de Disciplina y Méritos: registro de incidencias (positivas y negativas), puntos de conducta reflejados en el boletín.
   - Gestión de Exámenes Finales y Recuperaciones: flujo para alumnos reprobados (supletorios, mesas de examen, actas de calificación independientes).
 - Avanzado (diferenciadores):
-  - Integración con LMS/Aulas Virtuales (Google Classroom / Microsoft Teams) vía API: crear automáticamente el aula virtual al crear un "Grupo" en el ERP, con los alumnos ya matriculados.
-  - Rúbricas de Evaluación: calificar con una matriz (Presentación, Contenido, Ortografía, etc.) en vez de un solo número, y que el sistema calcule la nota. *Se conectaría naturalmente con el Plan de Evaluación ya construido (ver sección 3).*
-  - Analítica Predictiva (Alerta Temprana): dashboard para coordinación académica que cruce asistencia + disciplina + notas bajas para predecir riesgo de reprobar/desertar.
+  - Integración con LMS/Aulas Virtuales (Google Classroom / Microsoft Teams) vía API: **BLOQUEADO** — requiere credenciales OAuth reales del colegio (Google Workspace/Microsoft), igual que SafeSmartPickup. `lms.ts` ya existe pero es una simulación desde antes de esta sesión (`lmsGradesMock` hardcodeado).
+  - ~~Rúbricas de Evaluación~~ **RESUELTO** — ver sección 3/4.
+  - ~~Analítica Predictiva (Alerta Temprana)~~ **RESUELTO** — ver sección 3/4.
 
 **Admisiones y Marketing (CRM Escolar)**
 - Core:

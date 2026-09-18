@@ -13,7 +13,7 @@ const DEMO_SENDER_ID = '66666666-6666-6666-6666-666666666666';
 
 const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-type TabId = 'terms' | 'courses' | 'schedules' | 'grades_settings' | 'students' | 'bulk_import' | 'transport' | 'costs' | 'organization' | 'audit' | 'communications';
+type TabId = 'terms' | 'courses' | 'schedules' | 'grades_settings' | 'students' | 'bulk_import' | 'transport' | 'costs' | 'organization' | 'audit' | 'communications' | 'early_alert';
 
 interface AuditLog {
   id: string;
@@ -150,6 +150,18 @@ interface StudentSearchResult {
   grade: string | null;
 }
 
+interface RiskDashboardRow {
+  student_id: string;
+  first_name: string;
+  last_name: string;
+  grade: string | null;
+  section: string | null;
+  absence_count: number;
+  low_grade_count: number;
+  open_alert_count: number;
+  risk_level: 'alto' | 'medio' | 'ninguno';
+}
+
 export const AdminAdvancedPortal: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('terms');
   const [message, setMessage] = useState('');
@@ -204,6 +216,23 @@ export const AdminAdvancedPortal: React.FC = () => {
     name: '', discount_type: 'percent' as 'percent' | 'fixed', value: '', fee_concept: '', notes: '',
   });
   const [creatingDiscount, setCreatingDiscount] = useState(false);
+
+  // --- Alerta Temprana (Analítica Predictiva) ---
+  const [riskDashboard, setRiskDashboard] = useState<RiskDashboardRow[]>([]);
+  const [riskDashboardLoading, setRiskDashboardLoading] = useState(false);
+  const [riskFilter, setRiskFilter] = useState<'todos' | 'alto' | 'medio'>('todos');
+
+  const loadRiskDashboard = async () => {
+    setRiskDashboardLoading(true);
+    try {
+      const response = await fetch(`/api/v1/attendance/risk-dashboard?tenant_id=${DEMO_TENANT_ID}`);
+      const data = await response.json();
+      setRiskDashboard(data.dashboard || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+    setRiskDashboardLoading(false);
+  };
 
   // --- Organización (departamentos, jerarquía, puertas de salida) ---
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -486,6 +515,7 @@ export const AdminAdvancedPortal: React.FC = () => {
     if (activeTab === 'audit') loadAudit();
     if (activeTab === 'costs') { loadFeeSchedules(); loadGradeLevels(); loadStudentDiscounts(); }
     if (activeTab === 'grades_settings') loadGradeLevels();
+    if (activeTab === 'early_alert') loadRiskDashboard();
   }, [activeTab]);
 
   const handleCreateFeeSchedule = async () => {
@@ -1170,6 +1200,12 @@ export const AdminAdvancedPortal: React.FC = () => {
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'communications' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
           <Radio className="w-4 h-4 mr-2" /> Comunicaciones y LMS
+        </button>
+        <button
+          onClick={() => setActiveTab('early_alert')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'early_alert' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <AlertTriangle className="w-4 h-4 mr-2" /> Alerta Temprana
         </button>
       </div>
 
@@ -2458,6 +2494,73 @@ export const AdminAdvancedPortal: React.FC = () => {
               {commsLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Radio className="w-4 h-4 mr-2" />}
               Sincronizar Calificaciones
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Alerta Temprana (Analítica Predictiva) */}
+      {activeTab === 'early_alert' && (
+        <div className="space-y-6">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
+            Cruza tres señales que ya existen en el sistema para marcar riesgo de reprobar/desertar (no se inventa ningún umbral nuevo):
+            <strong> 3+ ausencias acumuladas</strong> (mismo umbral que ya dispara la alerta de ausentismo), <strong>al menos una nota de período por debajo de la nota de aprobación</strong> que el colegio configuró, y <strong>alertas activas sin resolver</strong>.
+            Riesgo <strong>alto</strong> = 2 o más señales, <strong>medio</strong> = 1 señal.
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-3 flex-wrap">
+              <h2 className="font-bold text-slate-700 flex items-center"><AlertTriangle className="w-4 h-4 mr-2 text-rose-600" /> Alumnos en Riesgo</h2>
+              <select
+                value={riskFilter}
+                onChange={e => setRiskFilter(e.target.value as 'todos' | 'alto' | 'medio')}
+                className="border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              >
+                <option value="todos">Todos los niveles</option>
+                <option value="alto">Solo riesgo alto</option>
+                <option value="medio">Solo riesgo medio</option>
+              </select>
+            </div>
+            {riskDashboardLoading ? (
+              <div className="flex items-center justify-center py-12 text-slate-400">
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Cargando...
+              </div>
+            ) : (
+              (() => {
+                const visible = riskDashboard.filter(r => riskFilter === 'todos' ? r.risk_level !== 'ninguno' : r.risk_level === riskFilter);
+                return visible.length === 0 ? (
+                  <p className="p-6 text-sm text-slate-400">Ningún alumno con señales de riesgo activas {riskFilter !== 'todos' ? `en nivel "${riskFilter}"` : ''}.</p>
+                ) : (
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">ALUMNO</th>
+                        <th className="px-4 py-3 font-semibold">GRADO</th>
+                        <th className="px-4 py-3 font-semibold text-center">AUSENCIAS</th>
+                        <th className="px-4 py-3 font-semibold text-center">NOTAS BAJAS</th>
+                        <th className="px-4 py-3 font-semibold text-center">ALERTAS ABIERTAS</th>
+                        <th className="px-4 py-3 font-semibold text-center">RIESGO</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {visible.map(r => (
+                        <tr key={r.student_id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-semibold text-slate-700">{r.first_name} {r.last_name}</td>
+                          <td className="px-4 py-3 text-slate-500">{r.grade || '—'} {r.section ? `- ${r.section}` : ''}</td>
+                          <td className="px-4 py-3 text-center text-slate-600">{r.absence_count}</td>
+                          <td className="px-4 py-3 text-center text-slate-600">{r.low_grade_count}</td>
+                          <td className="px-4 py-3 text-center text-slate-600">{r.open_alert_count}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                              r.risk_level === 'alto' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                            }`}>{r.risk_level}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()
+            )}
           </div>
         </div>
       )}

@@ -219,4 +219,149 @@ router.post("/grade", async (req: Request, res: Response) => {
   }
 });
 
+// ==========================================
+// RÚBRICAS DE EVALUACIÓN
+// ==========================================
+
+// GET /api/v1/assignments/:id/rubric
+// Lista los criterios de la rúbrica de una tarea (vacío si el docente
+// todavía califica con un solo puntaje, como antes)
+router.get("/:id/rubric", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabaseAdmin
+      .from("assignment_rubric_criteria")
+      .select("*")
+      .eq("assignment_id", id)
+      .order("sort_order");
+
+    if (error) return res.status(500).json({ error: "Error al consultar la rúbrica." });
+    return res.status(200).json({ success: true, criteria: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/assignments/:id/rubric:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/assignments/:id/rubric
+// Agrega un criterio a la rúbrica de la tarea (ej. "Contenido" 40pts,
+// "Presentación" 20pts, "Ortografía" 10pts...)
+router.post("/:id/rubric", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { tenant_id, name, max_points, sort_order } = req.body;
+
+    if (!tenant_id || !name || max_points === undefined) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, name, max_points)" });
+    }
+
+    const { data: criterion, error } = await supabaseAdmin
+      .from("assignment_rubric_criteria")
+      .insert({ tenant_id, assignment_id: id, name, max_points: Number(max_points), sort_order: sort_order ?? 0 })
+      .select()
+      .single();
+
+    if (error || !criterion) return res.status(500).json({ error: "No se pudo agregar el criterio." });
+    return res.status(201).json({ success: true, message: "Criterio agregado a la rúbrica.", criterion });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/assignments/:id/rubric:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// DELETE /api/v1/assignments/rubric/:criterionId
+router.delete("/rubric/:criterionId", async (req: Request, res: Response) => {
+  try {
+    const { criterionId } = req.params;
+    const { error } = await supabaseAdmin.from("assignment_rubric_criteria").delete().eq("id", criterionId);
+    if (error) return res.status(500).json({ error: "No se pudo eliminar el criterio." });
+    return res.status(200).json({ success: true, message: "Criterio eliminado." });
+  } catch (error: any) {
+    console.error("Error en DELETE /api/v1/assignments/rubric/:criterionId:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/assignments/grade-rubric
+// Califica una entrega usando la rúbrica: recibe el puntaje por cada
+// criterio, los guarda, y el puntaje final de la entrega (score) se
+// calcula automáticamente como la suma — el docente no digita un solo
+// número, lo arma la matriz de criterios.
+router.post("/grade-rubric", async (req: Request, res: Response) => {
+  try {
+    const { student_assignment_id, teacher_id, feedback, scores } = req.body as {
+      student_assignment_id: string; teacher_id: string; feedback?: string; scores: { criterion_id: string; points: number }[];
+    };
+
+    if (!student_assignment_id || !Array.isArray(scores) || scores.length === 0) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (student_assignment_id, scores)" });
+    }
+
+    const { data: studentAssignment } = await supabaseAdmin
+      .from("student_assignments")
+      .select("*, assignments(tenant_id, title)")
+      .eq("id", student_assignment_id)
+      .single();
+    if (!studentAssignment) return res.status(404).json({ error: "Entrega no encontrada." });
+
+    const tenant_id = studentAssignment.assignments.tenant_id;
+
+    await supabaseAdmin
+      .from("student_assignment_rubric_scores")
+      .upsert(
+        scores.map(s => ({ tenant_id, student_assignment_id, criterion_id: s.criterion_id, points: Number(s.points) })),
+        { onConflict: "student_assignment_id, criterion_id" }
+      );
+
+    const totalScore = scores.reduce((sum, s) => sum + Number(s.points), 0);
+
+    const { data: gradedAssignment, error } = await supabaseAdmin
+      .from("student_assignments")
+      .update({ status: "graded", score: totalScore, teacher_feedback: feedback || null, graded_at: new Date().toISOString() })
+      .eq("id", student_assignment_id)
+      .select("*, assignments(title, tenant_id)")
+      .single();
+
+    if (error || !gradedAssignment) return res.status(400).json({ error: "No se pudo calificar la tarea." });
+
+    const { data: parents } = await supabaseAdmin
+      .from("parent_students")
+      .select("parent_id")
+      .eq("student_id", gradedAssignment.student_id);
+
+    if (parents) {
+      const notifications = parents.map(p => ({
+        tenant_id, user_id: p.parent_id, title: "Tarea Calificada",
+        message: `La tarea "${gradedAssignment.assignments.title}" ha sido calificada con ${totalScore} (con rúbrica).`,
+        type: "success",
+      }));
+      await supabaseAdmin.from("notifications").insert(notifications);
+    }
+
+    return res.status(200).json({ success: true, message: "Calificación por rúbrica guardada.", assignment: gradedAssignment, totalScore });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/assignments/grade-rubric:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// GET /api/v1/assignments/:id/rubric-scores/:studentAssignmentId
+// Consulta los puntajes de rúbrica ya guardados para una entrega (para
+// precargar el formulario de calificación si ya se calificó antes)
+router.get("/:id/rubric-scores/:studentAssignmentId", async (req: Request, res: Response) => {
+  try {
+    const { studentAssignmentId } = req.params;
+    const { data, error } = await supabaseAdmin
+      .from("student_assignment_rubric_scores")
+      .select("criterion_id, points")
+      .eq("student_assignment_id", studentAssignmentId);
+
+    if (error) return res.status(500).json({ error: "Error al consultar los puntajes." });
+    return res.status(200).json({ success: true, scores: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/assignments/:id/rubric-scores/:studentAssignmentId:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 export default router;

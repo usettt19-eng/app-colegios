@@ -165,4 +165,74 @@ router.get("/alert/:student_id", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/v1/attendance/risk-dashboard?tenant_id=...
+// Analítica Predictiva (Alerta Temprana): cruza tres señales que YA existen
+// en el sistema (no se inventa ningún umbral nuevo) para marcar qué
+// alumnos tienen riesgo de reprobar/desertar:
+//   1. Ausencias acumuladas >= 3 — el mismo umbral que ya dispara la
+//      alerta CRITICAL_ABSENCE_STREAK y el SMS de Twilio (POST /record).
+//   2. Al menos una nota de período por debajo de tenants.passing_grade
+//      (la nota de aprobación que el propio colegio configuró en Admin).
+//   3. Alertas activas sin resolver en student_alerts (cualquier tipo:
+//      ausentismo, notas bajas, disciplina).
+// riesgo = "alto" si tiene 2 o más señales, "medio" si tiene 1, "ninguno"
+// si no tiene ninguna.
+router.get("/risk-dashboard", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    const { data: tenant } = await supabaseAdmin.from("tenants").select("passing_grade").eq("id", tenant_id).single();
+    const passingGrade = Number(tenant?.passing_grade ?? 70);
+
+    const [{ data: students }, { data: absences }, { data: lowGrades }, { data: alerts }] = await Promise.all([
+      supabaseAdmin.from("students").select("id, first_name, last_name, grade, section").eq("tenant_id", tenant_id),
+      supabaseAdmin.from("attendance_records").select("student_id").eq("tenant_id", tenant_id).eq("status", "absent"),
+      supabaseAdmin
+        .from("period_grades")
+        .select("calculated_grade, class_enrollments(enrollments(student_id))")
+        .eq("tenant_id", tenant_id)
+        .lt("calculated_grade", passingGrade),
+      supabaseAdmin.from("student_alerts").select("student_id").eq("tenant_id", tenant_id).eq("is_resolved", false),
+    ]);
+
+    const absenceCounts = new Map<string, number>();
+    for (const a of absences || []) absenceCounts.set(a.student_id, (absenceCounts.get(a.student_id) || 0) + 1);
+
+    const lowGradeCounts = new Map<string, number>();
+    for (const g of lowGrades || []) {
+      const studentId = (g as any).class_enrollments?.enrollments?.student_id;
+      if (studentId) lowGradeCounts.set(studentId, (lowGradeCounts.get(studentId) || 0) + 1);
+    }
+
+    const alertCounts = new Map<string, number>();
+    for (const al of alerts || []) alertCounts.set(al.student_id, (alertCounts.get(al.student_id) || 0) + 1);
+
+    const dashboard = (students || []).map(s => {
+      const absenceCount = absenceCounts.get(s.id) || 0;
+      const lowGradeCount = lowGradeCounts.get(s.id) || 0;
+      const openAlertCount = alertCounts.get(s.id) || 0;
+
+      const signals = [absenceCount >= 3, lowGradeCount > 0, openAlertCount > 0].filter(Boolean).length;
+      const riskLevel = signals >= 2 ? "alto" : signals === 1 ? "medio" : "ninguno";
+
+      return {
+        student_id: s.id, first_name: s.first_name, last_name: s.last_name, grade: s.grade, section: s.section,
+        absence_count: absenceCount, low_grade_count: lowGradeCount, open_alert_count: openAlertCount,
+        risk_level: riskLevel,
+      };
+    });
+
+    dashboard.sort((a, b) => {
+      const order: Record<string, number> = { alto: 0, medio: 1, ninguno: 2 };
+      return order[a.risk_level] - order[b.risk_level];
+    });
+
+    return res.status(200).json({ success: true, passingGrade, dashboard });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/attendance/risk-dashboard:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 export default router;
