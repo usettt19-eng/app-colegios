@@ -695,33 +695,92 @@ router.get("/payroll/runs", async (req: Request, res: Response) => {
 // Acumulado mensual de nómina: agrupa TODAS las planillas ya calculadas
 // (regulares + mes extra) por mes de inicio de periodo, sumando neto
 // pagado a empleados, costo patronal adicional y el total general
-// (lo que realmente le cuesta la nómina al colegio ese mes).
+// (lo que realmente le cuesta la nómina al colegio ese mes) — y además
+// desglosa cada mes por tipo de contratación (local/expatriado/honorarios),
+// porque no todos representan el mismo tipo de costo (honorarios no
+// genera costo patronal, por ejemplo).
 router.get("/payroll/summary", async (req: Request, res: Response) => {
   try {
     const { tenant_id } = req.query;
     if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
 
-    const { data: runs, error } = await supabaseAdmin
+    const { data: runs } = await supabaseAdmin
       .from("payroll_runs")
-      .select("period_start, run_type, total_amount, employer_cost, status")
+      .select("id, period_start, run_type, total_amount, employer_cost, status")
       .eq("tenant_id", tenant_id)
       .in("status", ["approved", "paid"])
       .order("period_start");
 
-    if (error) return res.status(500).json({ error: "Error al consultar el acumulado de nómina." });
+    if (!runs || runs.length === 0) return res.status(200).json({ success: true, months: [] });
 
-    const byMonth: Record<string, { netPay: number; employerCost: number; runsCount: number; hasExtraMonth: boolean }> = {};
-    for (const run of runs || []) {
+    const runById = new Map(runs.map(r => [r.id, r]));
+
+    const { data: paystubs, error: paystubsError } = await supabaseAdmin
+      .from("paystubs")
+      .select("payroll_run_id, gross_pay, deductions, net_pay, hr_employees(employment_type)")
+      .in("payroll_run_id", runs.map(r => r.id));
+
+    if (paystubsError) return res.status(500).json({ error: "Error al consultar los recibos de pago." });
+
+    type TypeTotals = { grossPay: number; netPay: number; count: number };
+    const emptyTypeTotals = (): TypeTotals => ({ grossPay: 0, netPay: 0, count: 0 });
+
+    const byMonth: Record<string, {
+      netPay: number; employerCost: number; runsCount: number; hasExtraMonth: boolean;
+      byType: { local: TypeTotals; expatriate: TypeTotals; honorarios: TypeTotals };
+    }> = {};
+
+    const countedRunsByMonth: Record<string, Set<string>> = {};
+
+    for (const stub of paystubs || []) {
+      const run = runById.get((stub as any).payroll_run_id);
+      if (!run) continue;
       const month = String(run.period_start).slice(0, 7); // "YYYY-MM"
-      if (!byMonth[month]) byMonth[month] = { netPay: 0, employerCost: 0, runsCount: 0, hasExtraMonth: false };
-      byMonth[month].netPay += Number(run.total_amount || 0);
-      byMonth[month].employerCost += Number(run.employer_cost || 0);
-      byMonth[month].runsCount += 1;
-      if (run.run_type === "extra_month") byMonth[month].hasExtraMonth = true;
+      if (!byMonth[month]) {
+        byMonth[month] = {
+          netPay: 0, employerCost: 0, runsCount: 0, hasExtraMonth: false,
+          byType: { local: emptyTypeTotals(), expatriate: emptyTypeTotals(), honorarios: emptyTypeTotals() },
+        };
+        countedRunsByMonth[month] = new Set();
+      }
+      const type: "local" | "expatriate" | "honorarios" = (stub as any).hr_employees?.employment_type || "local";
+      byMonth[month].byType[type].grossPay += Number(stub.gross_pay);
+      byMonth[month].byType[type].netPay += Number(stub.net_pay);
+      byMonth[month].byType[type].count += 1;
+
+      if (!countedRunsByMonth[month].has(run.id)) {
+        countedRunsByMonth[month].add(run.id);
+        byMonth[month].netPay += Number(run.total_amount || 0);
+        byMonth[month].employerCost += Number(run.employer_cost || 0);
+        byMonth[month].runsCount += 1;
+        if (run.run_type === "extra_month") byMonth[month].hasExtraMonth = true;
+      }
     }
 
     const months = Object.entries(byMonth)
-      .map(([month, totals]) => ({ month, ...totals, grandTotal: Number((totals.netPay + totals.employerCost).toFixed(2)) }))
+      .map(([month, totals]) => {
+        // El costo patronal se reparte proporcional al bruto de local+expatriado
+        // (honorarios nunca genera costo patronal, por definición).
+        const payrollGross = totals.byType.local.grossPay + totals.byType.expatriate.grossPay;
+        const employerCostByType = {
+          local: payrollGross > 0 ? Number((totals.employerCost * (totals.byType.local.grossPay / payrollGross)).toFixed(2)) : 0,
+          expatriate: payrollGross > 0 ? Number((totals.employerCost * (totals.byType.expatriate.grossPay / payrollGross)).toFixed(2)) : 0,
+          honorarios: 0,
+        };
+        return {
+          month,
+          netPay: totals.netPay,
+          employerCost: totals.employerCost,
+          runsCount: totals.runsCount,
+          hasExtraMonth: totals.hasExtraMonth,
+          grandTotal: Number((totals.netPay + totals.employerCost).toFixed(2)),
+          byType: {
+            local: { ...totals.byType.local, employerCost: employerCostByType.local },
+            expatriate: { ...totals.byType.expatriate, employerCost: employerCostByType.expatriate },
+            honorarios: { ...totals.byType.honorarios, employerCost: employerCostByType.honorarios },
+          },
+        };
+      })
       .sort((a, b) => b.month.localeCompare(a.month));
 
     return res.status(200).json({ success: true, months });

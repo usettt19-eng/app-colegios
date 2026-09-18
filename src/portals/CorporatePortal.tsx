@@ -82,6 +82,13 @@ interface Vendor {
   service_type: string | null;
 }
 
+interface PayrollTypeTotals {
+  grossPay: number;
+  netPay: number;
+  count: number;
+  employerCost: number;
+}
+
 interface PayrollMonthSummary {
   month: string;
   netPay: number;
@@ -89,6 +96,7 @@ interface PayrollMonthSummary {
   grandTotal: number;
   runsCount: number;
   hasExtraMonth: boolean;
+  byType: { local: PayrollTypeTotals; expatriate: PayrollTypeTotals; honorarios: PayrollTypeTotals };
 }
 
 interface PurchaseOrder {
@@ -136,6 +144,7 @@ export const CorporatePortal: React.FC = () => {
   const [deductionRateOverride, setDeductionRateOverride] = useState<Record<string, string>>({});
   const [countryRule, setCountryRule] = useState<CountryRule | null>(null);
   const [monthlySummary, setMonthlySummary] = useState<PayrollMonthSummary[]>([]);
+  const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
 
   const loadPayrollData = async () => {
     try {
@@ -774,7 +783,7 @@ export const CorporatePortal: React.FC = () => {
               <h2 className="font-bold text-slate-700">Acumulado Mensual de Nómina</h2>
             </div>
             <p className="px-4 pt-3 text-xs text-slate-500">
-              Suma TODAS las planillas ya calculadas de ese mes (regulares + mes extra), incluyendo el costo patronal adicional (lo que el colegio paga aparte del sueldo, no descontado al empleado) — así ves de un vistazo cuánto cuesta la nómina completa cada mes.
+              Suma TODAS las planillas ya calculadas de ese mes (regulares + mes extra), incluyendo el costo patronal adicional (lo que el colegio paga aparte del sueldo, no descontado al empleado) — así ves de un vistazo cuánto cuesta la nómina completa cada mes. Clic en un mes para desglosarlo por tipo de contratación.
             </p>
             {monthlySummary.length === 0 ? (
               <p className="p-6 text-sm text-slate-400">Aún no hay planillas calculadas.</p>
@@ -791,15 +800,51 @@ export const CorporatePortal: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {monthlySummary.map(m => (
-                    <tr key={m.month} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 font-semibold">
-                        {m.month}{m.hasExtraMonth && <span className="ml-2 text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">incl. mes extra</span>}
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono">${m.netPay.toFixed(2)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-slate-500">${m.employerCost.toFixed(2)}</td>
-                      <td className="px-4 py-3 text-right font-mono font-bold">${m.grandTotal.toFixed(2)}</td>
-                      <td className="px-4 py-3 text-right text-slate-500">{m.runsCount}</td>
-                    </tr>
+                    <React.Fragment key={m.month}>
+                      <tr className="hover:bg-slate-50 cursor-pointer" onClick={() => setExpandedMonth(expandedMonth === m.month ? null : m.month)}>
+                        <td className="px-4 py-3 font-semibold">
+                          {expandedMonth === m.month ? '▾ ' : '▸ '}{m.month}
+                          {m.hasExtraMonth && <span className="ml-2 text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">incl. mes extra</span>}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono">${m.netPay.toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-slate-500">${m.employerCost.toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right font-mono font-bold">${m.grandTotal.toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right text-slate-500">{m.runsCount}</td>
+                      </tr>
+                      {expandedMonth === m.month && (
+                        <tr>
+                          <td colSpan={5} className="bg-slate-50 px-4 py-3">
+                            <table className="w-full text-xs">
+                              <thead className="text-slate-500">
+                                <tr>
+                                  <th className="text-left font-semibold py-1">TIPO</th>
+                                  <th className="text-right font-semibold py-1">EMPLEADOS</th>
+                                  <th className="text-right font-semibold py-1">BRUTO</th>
+                                  <th className="text-right font-semibold py-1">NETO</th>
+                                  <th className="text-right font-semibold py-1">COSTO PATRONAL</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-200">
+                                {(['local', 'expatriate', 'honorarios'] as const).map(type => {
+                                  const t = m.byType[type];
+                                  if (t.count === 0) return null;
+                                  const label = type === 'local' ? 'Local' : type === 'expatriate' ? 'Expatriado' : 'Honorarios';
+                                  return (
+                                    <tr key={type}>
+                                      <td className="py-1.5 font-semibold text-slate-700">{label}</td>
+                                      <td className="py-1.5 text-right text-slate-500">{t.count}</td>
+                                      <td className="py-1.5 text-right font-mono text-slate-500">${t.grossPay.toFixed(2)}</td>
+                                      <td className="py-1.5 text-right font-mono">${t.netPay.toFixed(2)}</td>
+                                      <td className="py-1.5 text-right font-mono text-slate-500">${t.employerCost.toFixed(2)}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
