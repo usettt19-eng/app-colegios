@@ -65,20 +65,20 @@ interface Course {
   code: string;
   name: string;
   area: string | null;
-  weekly_hours: number | null;
-  course_grade_levels?: { grade_level_id: string; grade_levels: { id: string; name: string } | null }[];
+  course_grade_levels?: { grade_level_id: string; weekly_hours: number | null; grade_levels: { id: string; name: string } | null }[];
 }
 
 interface ClassGroup {
   id: string;
+  course_id: string;
   name: string;
   capacity: number;
   teacher_id: string | null;
   grade_section_id: string | null;
-  courses?: { name: string; code: string; weekly_hours?: number | null };
+  courses?: { name: string; code: string };
   profiles?: { first_name: string; last_name: string } | null;
   academic_terms?: { name: string };
-  grade_sections?: { name: string; grade_levels?: { name: string } } | null;
+  grade_sections?: { grade_level_id: string; name: string; grade_levels?: { name: string } } | null;
 }
 
 interface TeacherScheduleBlock {
@@ -128,7 +128,7 @@ export const AdminAdvancedPortal: React.FC = () => {
   const [classes, setClasses] = useState<ClassGroup[]>([]);
 
   const [termForm, setTermForm] = useState({ name: '', start_date: '', end_date: '', is_active: false });
-  const [courseForm, setCourseForm] = useState({ code: '', name: '', area: '', weekly_hours: '' });
+  const [courseForm, setCourseForm] = useState({ code: '', name: '', area: '' });
   const [courseGradeLevelIds, setCourseGradeLevelIds] = useState<string[]>([]);
   const [generateGroupsForm, setGenerateGroupsForm] = useState<Record<string, { term_id: string; teacher_id: string }>>({});
   const [generatingGroupsCourseId, setGeneratingGroupsCourseId] = useState<string | null>(null);
@@ -605,14 +605,13 @@ export const AdminAdvancedPortal: React.FC = () => {
           code: courseForm.code,
           name: courseForm.name,
           area: courseForm.area || null,
-          weekly_hours: courseForm.weekly_hours ? Number(courseForm.weekly_hours) : null,
           grade_level_ids: courseGradeLevelIds,
         }),
       });
       const data = await response.json();
       if (data.success) {
         setMessage('✅ Curso agregado al catálogo académico.');
-        setCourseForm({ code: '', name: '', area: '', weekly_hours: '' });
+        setCourseForm({ code: '', name: '', area: '' });
         setCourseGradeLevelIds([]);
         loadAll();
       } else {
@@ -958,13 +957,8 @@ export const AdminAdvancedPortal: React.FC = () => {
                 onChange={e => setCourseForm({ ...courseForm, area: e.target.value })}
                 className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
               />
-              <input
-                type="number" step="0.5" placeholder="Horas semanales de clase" value={courseForm.weekly_hours}
-                onChange={e => setCourseForm({ ...courseForm, weekly_hours: e.target.value })}
-                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
-              />
               <div>
-                <p className="text-xs font-bold text-slate-500 mb-1.5">¿A qué grados aplica? (opcional, para "Generar Grupos" después)</p>
+                <p className="text-xs font-bold text-slate-500 mb-1.5">¿A qué grados aplica? (opcional, para "Generar Grupos" después; las horas semanales de cada grado se configuran luego en la Matriz de Plan de Estudios, porque pueden variar por grado)</p>
                 <div className="flex flex-wrap gap-2">
                   {gradeLevels.map(g => {
                     const checked = courseGradeLevelIds.includes(g.id);
@@ -1199,7 +1193,9 @@ export const AdminAdvancedPortal: React.FC = () => {
                   classes.filter(c => c.teacher_id === distTeacherId).map(c => {
                     const blocks = teacherSchedules.filter(b => b.class_id === c.id);
                     const scheduledHours = blocks.reduce((sum, b) => sum + blockHours(b.start_time, b.end_time), 0);
-                    const targetHours = c.courses?.weekly_hours ?? null;
+                    const courseData = courses.find(co => co.id === c.course_id);
+                    const gradeLevelId = c.grade_sections?.grade_level_id;
+                    const targetHours = courseData?.course_grade_levels?.find(cgl => cgl.grade_level_id === gradeLevelId)?.weekly_hours ?? null;
                     const short = targetHours !== null && scheduledHours < targetHours;
                     return (
                       <div key={c.id} className="border border-slate-200 rounded-lg p-3">

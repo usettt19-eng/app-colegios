@@ -15,6 +15,7 @@ CREATE TABLE public.course_grade_levels (
     tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
     course_id UUID NOT NULL REFERENCES public.courses(id) ON DELETE CASCADE,
     grade_level_id UUID NOT NULL REFERENCES public.grade_levels(id) ON DELETE CASCADE,
+    weekly_hours DECIMAL(3,1), -- Horas de clase por semana de este curso EN ESE grado (puede variar entre grados, ej. Matemática 1ro vs 5to)
     created_at TIMESTAMPTZ DEFAULT now(),
     UNIQUE(course_id, grade_level_id)
 );

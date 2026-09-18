@@ -77,7 +77,7 @@ router.get("/courses", async (req: Request, res: Response) => {
 
     const { data, error } = await supabaseAdmin
       .from("courses")
-      .select("*, course_grade_levels(grade_level_id, grade_levels(id, name))")
+      .select("*, course_grade_levels(grade_level_id, weekly_hours, grade_levels(id, name))")
       .eq("tenant_id", tenant_id)
       .order("name");
 
@@ -95,14 +95,14 @@ router.get("/courses", async (req: Request, res: Response) => {
 // masivamente después con POST /courses/:id/generate-groups.
 router.post("/courses", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, code, name, area, description, weekly_hours, grade_level_ids } = req.body;
+    const { tenant_id, code, name, area, description, grade_level_ids } = req.body;
     if (!tenant_id || !code || !name) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, code, name)" });
     }
 
     const { data: course, error } = await supabaseAdmin
       .from("courses")
-      .insert({ tenant_id, code, name, area: area || null, description, weekly_hours })
+      .insert({ tenant_id, code, name, area: area || null, description })
       .select()
       .single();
 
@@ -128,21 +128,44 @@ router.post("/courses", async (req: Request, res: Response) => {
 });
 
 // POST /api/v1/academics/courses/:id/grade-levels
-// Marca (agrega) un grado a la matriz de plan de estudios de este curso.
+// Marca (agrega) un grado a la matriz de plan de estudios de este curso,
+// con sus horas semanales propias (pueden variar entre grados).
 router.post("/courses/:id/grade-levels", async (req: Request, res: Response) => {
   try {
     const { id: course_id } = req.params;
-    const { tenant_id, grade_level_id } = req.body;
+    const { tenant_id, grade_level_id, weekly_hours } = req.body;
     if (!tenant_id || !grade_level_id) return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, grade_level_id)" });
 
     const { error } = await supabaseAdmin
       .from("course_grade_levels")
-      .upsert({ tenant_id, course_id, grade_level_id }, { onConflict: "course_id, grade_level_id" });
+      .upsert({ tenant_id, course_id, grade_level_id, weekly_hours: weekly_hours ?? null }, { onConflict: "course_id, grade_level_id" });
 
     if (error) return res.status(500).json({ error: "No se pudo marcar el grado para este curso." });
     return res.status(200).json({ success: true });
   } catch (error: any) {
     console.error("Error en POST /api/v1/academics/courses/:id/grade-levels:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// PATCH /api/v1/academics/courses/:id/grade-levels/:gradeLevelId
+// Edita solo las horas semanales de un curso ya asignado a un grado
+// (sin desmarcarlo/rehacerlo).
+router.patch("/courses/:id/grade-levels/:gradeLevelId", async (req: Request, res: Response) => {
+  try {
+    const { id: course_id, gradeLevelId } = req.params;
+    const { weekly_hours } = req.body;
+
+    const { error } = await supabaseAdmin
+      .from("course_grade_levels")
+      .update({ weekly_hours: weekly_hours ?? null })
+      .eq("course_id", course_id)
+      .eq("grade_level_id", gradeLevelId);
+
+    if (error) return res.status(500).json({ error: "No se pudieron actualizar las horas semanales." });
+    return res.status(200).json({ success: true });
+  } catch (error: any) {
+    console.error("Error en PATCH /api/v1/academics/courses/:id/grade-levels/:gradeLevelId:", error);
     return res.status(500).json({ error: "Error interno" });
   }
 });
@@ -239,7 +262,7 @@ router.get("/classes", async (req: Request, res: Response) => {
 
     let query = supabaseAdmin
       .from("classes")
-      .select("*, courses(name, code, weekly_hours), profiles(first_name, last_name), academic_terms(name), grade_sections(name, grade_levels(name))")
+      .select("*, courses(name, code), profiles(first_name, last_name), academic_terms(name), grade_sections(grade_level_id, name, grade_levels(name))")
       .eq("tenant_id", tenant_id);
 
     if (term_id) query = query.eq("term_id", term_id);
@@ -405,7 +428,7 @@ router.get("/schedules", async (req: Request, res: Response) => {
 
     let query = supabaseAdmin
       .from("class_schedules")
-      .select("*, classes!inner(id, name, teacher_id, course_id, courses(name, weekly_hours), grade_sections(name, grade_levels(name)))")
+      .select("*, classes!inner(id, name, teacher_id, course_id, courses(name), grade_sections(name, grade_levels(name)))")
       .eq("tenant_id", tenant_id);
 
     if (teacher_id) query = query.eq("classes.teacher_id", teacher_id);

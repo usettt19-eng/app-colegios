@@ -49,6 +49,9 @@ CREATE TABLE public.enrollments (
 
 -- 3. Courses (Catálogo de Materias)
 -- Ej: "Matemáticas Avanzadas", "Biología I"
+-- Nota: las horas semanales de clase NO viven aquí porque varían por grado
+-- (ej. Matemática de 1ro no son las mismas horas que Matemática de 5to);
+-- están en course_grade_levels.weekly_hours (ver course_grade_levels_module.md).
 CREATE TABLE public.courses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
@@ -56,7 +59,6 @@ CREATE TABLE public.courses (
     name TEXT NOT NULL,
     area TEXT, -- Área curricular (ej. "Humanística", "Científica", "Tecnológica"), para agrupar en la matriz de plan de estudios
     description TEXT,
-    weekly_hours DECIMAL(3,1), -- Horas de clase por semana; usado en el módulo de Horarios/distributivo docente
     created_at TIMESTAMPTZ DEFAULT now(),
     UNIQUE(tenant_id, code)
 );

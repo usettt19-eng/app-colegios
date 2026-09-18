@@ -44,7 +44,7 @@ interface CarpoolOverride {
 
 interface ClassEnrollment {
   final_grade: number | null;
-  classes?: { name: string; courses?: { name: string; weekly_hours: number } };
+  classes?: { name: string; courses?: { name: string } };
 }
 
 interface Enrollment {
