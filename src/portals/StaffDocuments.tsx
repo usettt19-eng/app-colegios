@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FileUp, Loader2, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { FileUp, Loader2, CheckCircle2, XCircle, Clock, Eye } from 'lucide-react';
 
 const STAFF_DOC_TYPES: { value: string; label: string }[] = [
   { value: 'degree', label: 'Título / Diploma' },
@@ -18,19 +18,28 @@ interface StaffDocument {
   title: string;
   status: 'pending_review' | 'approved' | 'rejected';
   created_at: string;
+  download_url?: string | null;
+}
+
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 interface Props {
   tenantId: string;
   profileId: string;
   reviewerId?: string;
+  canReview?: boolean;
 }
 
-function readFileName(file: File): string {
-  return file.name;
-}
-
-export const StaffDocuments: React.FC<Props> = ({ tenantId, profileId, reviewerId }) => {
+export const StaffDocuments: React.FC<Props> = ({ tenantId, profileId, reviewerId, canReview = true }) => {
   const [documents, setDocuments] = useState<StaffDocument[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -53,14 +62,16 @@ export const StaffDocuments: React.FC<Props> = ({ tenantId, profileId, reviewerI
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId]);
 
-  const handleUpload = async (fileName: string) => {
+  const handleUpload = async (file: File) => {
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setMessage('❌ El archivo supera el máximo permitido (10MB).');
+      return;
+    }
     setLoading(true);
     setMessage('');
     try {
       const docTypeLabel = STAFF_DOC_TYPES.find(d => d.value === selectedDocType)?.label || selectedDocType;
-      // El archivo real se sube directo a Supabase Storage desde el cliente;
-      // aquí solo registramos la referencia resultante en el expediente.
-      const fakeFileUrl = `staff-documents/${tenantId}/${profileId}/${selectedDocType}_${fileName}`;
+      const fileData = await readFileAsDataUrl(file);
 
       const response = await fetch('/api/v1/staff-documents/upload', {
         method: 'POST',
@@ -70,8 +81,9 @@ export const StaffDocuments: React.FC<Props> = ({ tenantId, profileId, reviewerI
           profile_id: profileId,
           uploader_id: reviewerId || null,
           doc_type: selectedDocType,
-          title: `${docTypeLabel} - ${fileName}`,
-          file_url: fakeFileUrl,
+          title: `${docTypeLabel} - ${file.name}`,
+          file_data: fileData,
+          file_name: file.name,
         }),
       });
       const data = await response.json();
@@ -132,10 +144,10 @@ export const StaffDocuments: React.FC<Props> = ({ tenantId, profileId, reviewerI
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileUp className="w-4 h-4" />}
           Adjuntar Documento
           <input
-            type="file" className="hidden"
+            type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx" className="hidden"
             onChange={e => {
               const file = e.target.files?.[0];
-              if (file) handleUpload(readFileName(file));
+              if (file) handleUpload(file);
               e.target.value = '';
             }}
           />
@@ -150,8 +162,13 @@ export const StaffDocuments: React.FC<Props> = ({ tenantId, profileId, reviewerI
             <div key={doc.id} className="flex items-center justify-between bg-white border border-slate-200 rounded-md px-3 py-2">
               <span className="text-sm font-medium text-slate-700">{doc.title}</span>
               <div className="flex items-center gap-2">
+                {doc.download_url && (
+                  <a href={doc.download_url} target="_blank" rel="noopener noreferrer" className="flex items-center text-xs font-bold text-slate-500 hover:text-slate-700">
+                    <Eye className="w-3.5 h-3.5 mr-1" /> Ver
+                  </a>
+                )}
                 {statusBadge(doc.status)}
-                {doc.status === 'pending_review' && (
+                {canReview && doc.status === 'pending_review' && (
                   <>
                     <button onClick={() => handleReview(doc.id, 'approved')} className="text-xs font-bold text-emerald-600 hover:underline">Verificar</button>
                     <button onClick={() => handleReview(doc.id, 'rejected')} className="text-xs font-bold text-rose-600 hover:underline">Rechazar</button>

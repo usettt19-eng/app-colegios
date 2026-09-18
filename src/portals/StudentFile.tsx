@@ -16,7 +16,7 @@ interface FullRecord {
   guardians: { relationship: string; profiles: { id: string; first_name: string; last_name: string; email: string; phone: string | null; role: string } | null }[];
   academicHistory: { id: string; status: string; enrollment_date: string; academic_terms: { name: string; start_date: string; end_date: string } | null; class_enrollments: { final_grade: number | null; classes: { name: string; courses: { name: string } | null } | null }[] }[];
   reportCards: { id: string; gpa: number | null; is_published: boolean; published_at: string | null; academic_terms: { name: string } | null; report_card_details: { final_score: number | null; classes: { name: string } | null }[] }[];
-  documents: { id: string; doc_type: string; title: string | null; status: string; file_url: string; created_at: string }[];
+  documents: { id: string; doc_type: string; title: string | null; status: string; file_url: string; download_url?: string | null; created_at: string }[];
   attendance: { records: { id: string; date: string; status: string; notes: string | null; classes: { name: string; courses: { name: string } | null } | null }[]; summary: { present: number; absent: number; late: number; excused: number } };
   alerts: { id: string; type: string; risk_level: string; description: string; is_resolved: boolean; resolution_notes: string | null; created_at: string }[];
   invoices: { id: string; invoice_number: string; amount: number; currency: string; status: string; due_date: string; issued_date: string; invoice_line_items: { description: string; quantity: number; unit_price: number; discount: number | null }[] }[];
@@ -273,10 +273,15 @@ export const StudentFile: React.FC<Props> = ({ studentId, onClose }) => {
                             <p className="font-semibold text-slate-700">{d.title || d.doc_type}</p>
                             <p className="text-xs text-slate-400">{d.doc_type} · {new Date(d.created_at).toLocaleDateString()}</p>
                           </div>
-                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                            d.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :
-                            d.status === 'rejected' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
-                          }`}>{d.status}</span>
+                          <div className="flex items-center gap-2">
+                            {d.download_url && (
+                              <a href={d.download_url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-slate-500 hover:text-slate-700">Ver</a>
+                            )}
+                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                              d.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :
+                              d.status === 'rejected' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                            }`}>{d.status}</span>
+                          </div>
                         </div>
                       ))}
                     </div>

@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Calendar, CheckSquare, AlertTriangle, Send, BookOpen, Plus, Loader2, ClipboardCheck, GraduationCap, MessageSquare, Award } from 'lucide-react';
+import { Calendar, CheckSquare, AlertTriangle, Send, BookOpen, Plus, Loader2, ClipboardCheck, GraduationCap, MessageSquare, Award, FolderOpen } from 'lucide-react';
 import { MessagingInbox } from './MessagingInbox';
+import { StaffDocuments } from './StaffDocuments';
 import { useAuth } from '../contexts/AuthContext';
 import { LoginPage } from './LoginPage';
 
-type TabId = 'attendance' | 'assignments' | 'evaluation' | 'grades' | 'messages';
+type TabId = 'attendance' | 'assignments' | 'evaluation' | 'grades' | 'messages' | 'my-file';
 
 interface ClassGroup {
   id: string;
@@ -502,6 +503,12 @@ const TeacherPortalInner: React.FC<InnerProps> = ({ tenantId, teacherId, teacher
           >
             <MessageSquare className="w-4 h-4 mr-2" /> Mensajería
           </button>
+          <button
+            onClick={() => setActiveTab('my-file')}
+            className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center text-sm ${activeTab === 'my-file' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}
+          >
+            <FolderOpen className="w-4 h-4 mr-2" /> Mi Expediente
+          </button>
         </div>
       )}
 
@@ -850,6 +857,16 @@ const TeacherPortalInner: React.FC<InnerProps> = ({ tenantId, teacherId, teacher
 
       {activeTab === 'messages' && (
         <MessagingInbox tenantId={DEMO_TENANT_ID} profileId={DEMO_TEACHER_ID} recipientRole="parent" />
+      )}
+
+      {activeTab === 'my-file' && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-4 bg-gray-50 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-800 flex items-center"><FolderOpen className="w-4 h-4 mr-2 text-indigo-600" /> Mi Expediente</h2>
+            <p className="text-xs text-gray-400 mt-1">Sube tus documentos (título, certificaciones, CV, antecedentes, etc.). Administración los revisa y verifica.</p>
+          </div>
+          <StaffDocuments tenantId={DEMO_TENANT_ID} profileId={DEMO_TEACHER_ID} canReview={false} />
+        </div>
       )}
     </div>
   );

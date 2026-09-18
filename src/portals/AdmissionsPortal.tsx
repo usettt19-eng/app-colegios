@@ -33,6 +33,7 @@ interface UploadedDoc {
   doc_type: string;
   title: string;
   status: string;
+  download_url?: string | null;
 }
 
 interface GradeLevel {
@@ -189,15 +190,17 @@ export const AdmissionsPortal: React.FC = () => {
     setLoading(false);
   };
 
-  const handleUploadDoc = async (fileName: string) => {
+  const handleUploadDoc = async (file: File) => {
     if (!studentId) return;
+    if (file.size > 10 * 1024 * 1024) {
+      setMessage('❌ El archivo supera el máximo permitido (10MB).');
+      return;
+    }
     setLoading(true);
     setMessage('');
     try {
       const docTypeLabel = DOC_TYPES.find(d => d.value === selectedDocType)?.label || selectedDocType;
-      // El archivo real se sube directo a Supabase Storage desde el cliente;
-      // aquí solo registramos la referencia resultante en el expediente.
-      const fakeFileUrl = `documents/${DEMO_TENANT_ID}/${studentId}/${selectedDocType}_${fileName}`;
+      const fileData = await readFileAsDataUrl(file);
 
       const response = await fetch('/api/v1/documents/upload', {
         method: 'POST',
@@ -207,13 +210,14 @@ export const AdmissionsPortal: React.FC = () => {
           student_id: studentId,
           uploader_id: resolvedParentId,
           doc_type: selectedDocType,
-          title: `${docTypeLabel} - ${fileName}`,
-          file_url: fakeFileUrl,
+          title: `${docTypeLabel} - ${file.name}`,
+          file_data: fileData,
+          file_name: file.name,
         }),
       });
       const data = await response.json();
       if (data.success) {
-        setUploadedDocs(prev => [...prev, { doc_type: selectedDocType, title: data.document.title, status: data.document.status }]);
+        setUploadedDocs(prev => [...prev, { doc_type: selectedDocType, title: data.document.title, status: data.document.status, download_url: data.document.download_url }]);
         setMessage(`✅ Documento "${docTypeLabel}" adjuntado. En espera de revisión.`);
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo subir el documento.'));
@@ -510,9 +514,10 @@ export const AdmissionsPortal: React.FC = () => {
             </select>
             <input
               type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
               onChange={e => {
                 const file = e.target.files?.[0];
-                if (file) handleUploadDoc(file.name);
+                if (file) handleUploadDoc(file);
                 e.target.value = '';
               }}
               disabled={loading}

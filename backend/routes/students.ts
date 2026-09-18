@@ -1,6 +1,7 @@
 import { Request, Response, Router } from "express";
 import { supabaseAdmin } from "../supabase";
 import { uploadProfilePhoto } from "../services/photoStorage";
+import { getSignedDocumentUrl } from "../services/documentStorage";
 
 const router = Router();
 
@@ -468,6 +469,10 @@ router.get("/:id/full-record", async (req: Request, res: Response) => {
       excused: attendanceRecords.filter((r: any) => r.status === "excused").length,
     };
 
+    const documents = await Promise.all(
+      (documentsRes.data || []).map(async (doc: any) => ({ ...doc, download_url: await getSignedDocumentUrl(doc.file_url) }))
+    );
+
     return res.status(200).json({
       success: true,
       record: {
@@ -475,7 +480,7 @@ router.get("/:id/full-record", async (req: Request, res: Response) => {
         guardians: guardiansRes.data || [],
         academicHistory: enrollmentsRes.data || [],
         reportCards: reportCardsRes.data || [],
-        documents: documentsRes.data || [],
+        documents,
         attendance: { records: attendanceRecords, summary: attendanceSummary },
         alerts: alertsRes.data || [],
         invoices: invoicesRes.data || [],

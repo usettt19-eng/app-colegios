@@ -27,7 +27,17 @@ interface HealthCard {
   id: string;
   title: string;
   file_url: string;
+  download_url?: string | null;
   created_at: string;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 interface Props {
@@ -222,9 +232,13 @@ export const StudentMedicalRecord: React.FC<Props> = ({ tenantId, studentId, req
 
   const handleUploadCard = async (file: File | undefined) => {
     if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      onMessage('❌ El archivo supera el máximo permitido (10MB).');
+      return;
+    }
     setLoading(true);
     try {
-      const fakeFileUrl = `documents/${tenantId}/${studentId}/tarjeta_salud_${Date.now()}_${file.name}`;
+      const fileData = await readFileAsDataUrl(file);
       const response = await fetch('/api/v1/documents/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -234,7 +248,8 @@ export const StudentMedicalRecord: React.FC<Props> = ({ tenantId, studentId, req
           uploader_id: requesterId,
           doc_type: 'medical_record',
           title: `Tarjeta de Salud - ${file.name}`,
-          file_url: fakeFileUrl,
+          file_data: fileData,
+          file_name: file.name,
         }),
       });
       const data = await response.json();
@@ -500,7 +515,11 @@ export const StudentMedicalRecord: React.FC<Props> = ({ tenantId, studentId, req
                 <td className="px-3 py-2">{c.title}</td>
                 <td className="px-3 py-2">{new Date(c.created_at).toLocaleString()}</td>
                 <td className="px-3 py-2 text-right">
-                  <a href={c.file_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:text-blue-800"><Eye className="w-4 h-4 inline" /></a>
+                  {c.download_url ? (
+                    <a href={c.download_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:text-blue-800"><Eye className="w-4 h-4 inline" /></a>
+                  ) : (
+                    <span className="text-slate-300"><Eye className="w-4 h-4 inline" /></span>
+                  )}
                 </td>
               </tr>
             ))}

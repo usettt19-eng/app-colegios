@@ -55,7 +55,12 @@ import { startAutoReleaseJob } from "./backend/jobs/autoRelease";
 import { startRecurringExpenseReminderJob } from "./backend/jobs/recurringExpenseReminders";
 
 const app = express();
-app.use(express.json());
+// 15mb: los documentos del expediente (cédulas escaneadas, contratos,
+// cotizaciones en PDF) viajan como data URL base64 en el body JSON; el
+// límite por defecto de Express (100kb) es demasiado chico incluso para
+// fotos de perfil, y ahora que hay subida real de archivos a Storage
+// (documentStorage.ts) hace falta espacio para PDFs de varias páginas.
+app.use(express.json({ limit: "15mb" }));
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/pickup", pickupRoutes);
 app.use("/api/v1/webhooks", webhooksRoutes);

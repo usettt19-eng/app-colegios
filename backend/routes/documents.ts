@@ -1,5 +1,6 @@
 import { Request, Response, Router } from "express";
 import { supabaseAdmin } from "../supabase";
+import { uploadDocumentFile, getSignedDocumentUrl } from "../services/documentStorage";
 
 const router = Router();
 
@@ -20,7 +21,14 @@ router.get("/:student_id", async (req: Request, res: Response) => {
       return res.status(500).json({ error: "Error al consultar los documentos." });
     }
 
-    return res.status(200).json({ success: true, documents: data });
+    // La URL firmada (temporal, 1h) es la única forma de ver/descargar el
+    // archivo real del bucket privado "documents"; file_url guarda solo la
+    // ruta interna. Viene null si es un registro viejo sin archivo real.
+    const documents = await Promise.all(
+      (data || []).map(async doc => ({ ...doc, download_url: await getSignedDocumentUrl(doc.file_url) }))
+    );
+
+    return res.status(200).json({ success: true, documents });
   } catch (error: any) {
     console.error("Error en GET /api/v1/documents/:student_id:", error);
     return res.status(500).json({ error: "Error interno" });
@@ -28,13 +36,23 @@ router.get("/:student_id", async (req: Request, res: Response) => {
 });
 
 // POST /api/v1/documents/upload
-// Endpoint para que los padres o secretaria suban los documentos requeridos (ej. notas colegio anterior)
+// Endpoint para que los padres o secretaria suban los documentos requeridos
+// (ej. notas colegio anterior). file_data es el archivo como data URL
+// ("data:<mime>;base64,..."), se sube al bucket privado "documents" y se
+// guarda su ruta interna en file_url.
 router.post("/upload", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, student_id, uploader_id, doc_type, title, file_url } = req.body;
+    const { tenant_id, student_id, uploader_id, doc_type, title, file_data, file_name } = req.body;
 
-    if (!tenant_id || !student_id || !doc_type || !file_url) {
+    if (!tenant_id || !student_id || !doc_type || !file_data) {
       return res.status(400).json({ error: "Faltan parámetros requeridos para el documento." });
+    }
+
+    let file_url: string;
+    try {
+      file_url = await uploadDocumentFile(file_data, tenant_id, "students", student_id, file_name || "documento");
+    } catch (uploadError: any) {
+      return res.status(400).json({ error: uploadError.message || "No se pudo subir el archivo." });
     }
 
     const { data: document, error } = await supabaseAdmin

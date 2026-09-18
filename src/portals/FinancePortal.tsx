@@ -5,8 +5,13 @@ import { DollarSign, TrendingUp, TrendingDown, Wallet, Loader2, Plus, FileUp, Ca
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
 const DEMO_ACTOR_ID = '66666666-6666-6666-6666-666666666666';
 
-function readFileName(file: File): string {
-  return file.name;
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 // Periodo actual en formato "YYYY-MM", igual al que usa Colecturía para las facturas de alumnos
@@ -50,6 +55,7 @@ interface PurchaseOrder {
   status: string;
   quote_title: string | null;
   quote_file_url: string | null;
+  quote_download_url?: string | null;
   scheduled_payment_date: string | null;
   recurring_expense_id: string | null;
   billing_period: string | null;
@@ -94,7 +100,7 @@ export const FinancePortal: React.FC = () => {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [poForm, setPoForm] = useState({ vendor_id: '', subtotal: '', tax_rate: '7', quote_title: '' });
-  const [quoteFileName, setQuoteFileName] = useState('');
+  const [quoteFile, setQuoteFile] = useState<File | null>(null);
 
   // --- Gastos Recurrentes Mensuales (energía, agua, internet...) ---
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
@@ -208,16 +214,18 @@ export const FinancePortal: React.FC = () => {
   };
 
   const handleCreateQuote = async () => {
-    if (!poForm.vendor_id || !poForm.subtotal || !quoteFileName) {
+    if (!poForm.vendor_id || !poForm.subtotal || !quoteFile) {
       setMessage('❌ Selecciona el proveedor, el subtotal y adjunta la cotización.');
+      return;
+    }
+    if (quoteFile.size > 10 * 1024 * 1024) {
+      setMessage('❌ El archivo supera el máximo permitido (10MB).');
       return;
     }
     setLoading(true);
     setMessage('');
     try {
-      // El archivo real se sube directo a Supabase Storage desde el cliente;
-      // aquí solo registramos la referencia resultante en la orden de compra.
-      const fakeFileUrl = `quotes/${DEMO_TENANT_ID}/${poForm.vendor_id}_${quoteFileName}`;
+      const fileData = await readFileAsDataUrl(quoteFile);
       const response = await fetch('/api/v1/corporate/purchase-orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -228,14 +236,15 @@ export const FinancePortal: React.FC = () => {
           subtotal: Number(poForm.subtotal),
           tax_rate: Number(poForm.tax_rate || 0),
           quote_title: poForm.quote_title || null,
-          quote_file_url: fakeFileUrl,
+          quote_file_data: fileData,
+          quote_file_name: quoteFile.name,
         }),
       });
       const data = await response.json();
       if (data.success) {
         setMessage('✅ Cotización subida, pendiente de aprobación.');
         setPoForm({ vendor_id: '', subtotal: '', tax_rate: '7', quote_title: '' });
-        setQuoteFileName('');
+        setQuoteFile(null);
         loadProcurement();
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo registrar la cotización.'));
@@ -555,10 +564,10 @@ export const FinancePortal: React.FC = () => {
             </div>
             <label className="flex items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-lg py-4 cursor-pointer hover:border-green-400 hover:bg-green-50">
               <FileUp className="w-4 h-4 text-slate-400" />
-              <span className="text-sm text-slate-500">{quoteFileName || 'Selecciona el archivo de la cotización'}</span>
+              <span className="text-sm text-slate-500">{quoteFile?.name || 'Selecciona el archivo de la cotización'}</span>
               <input
-                type="file" className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) setQuoteFileName(readFileName(f)); }}
+                type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) setQuoteFile(f); }}
               />
             </label>
             <button
@@ -589,6 +598,9 @@ export const FinancePortal: React.FC = () => {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
+                      {po.quote_download_url && (
+                        <a href={po.quote_download_url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-slate-500 hover:text-slate-700">Ver cotización</a>
+                      )}
                       {statusBadge(po.status)}
                       <button onClick={() => handleApprove(po.id, 'approved')} className="text-xs font-bold text-emerald-600 hover:underline">Aprobar</button>
                       <button onClick={() => handleApprove(po.id, 'cancelled')} className="text-xs font-bold text-rose-600 hover:underline">Rechazar</button>

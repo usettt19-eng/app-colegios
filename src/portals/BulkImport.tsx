@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertTriangle, Link2, Users2, UserPlus } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertTriangle, Link2, Users2, UserPlus, Briefcase } from 'lucide-react';
 
 interface Props {
   tenantId: string;
@@ -50,15 +50,19 @@ function parseCsv(text: string): Record<string, string>[] {
 
 const STUDENT_COLUMNS = ['nombre', 'apellido', 'grado', 'seccion', 'codigo_familia', 'cedula', 'fecha_nacimiento'];
 const PARENT_COLUMNS = ['nombre', 'apellido', 'email', 'telefono', 'cedula', 'relacion', 'codigo_familia'];
+const STAFF_COLUMNS = ['nombre', 'apellido', 'email', 'telefono', 'cedula', 'rol'];
 
 export const BulkImport: React.FC<Props> = ({ tenantId }) => {
   const [studentRows, setStudentRows] = useState<Record<string, string>[]>([]);
   const [parentRows, setParentRows] = useState<Record<string, string>[]>([]);
+  const [staffRows, setStaffRows] = useState<Record<string, string>[]>([]);
   const [importingStudents, setImportingStudents] = useState(false);
   const [importingParents, setImportingParents] = useState(false);
+  const [importingStaff, setImportingStaff] = useState(false);
   const [relinking, setRelinking] = useState(false);
   const [studentSummary, setStudentSummary] = useState<ImportSummary | null>(null);
   const [parentSummary, setParentSummary] = useState<ImportSummary | null>(null);
+  const [staffSummary, setStaffSummary] = useState<ImportSummary | null>(null);
   const [message, setMessage] = useState('');
 
   const readCsvFile = (file: File, onParsed: (rows: Record<string, string>[]) => void) => {
@@ -128,6 +132,37 @@ export const BulkImport: React.FC<Props> = ({ tenantId }) => {
     setImportingParents(false);
   };
 
+  const handleImportStaff = async () => {
+    if (staffRows.length === 0) return;
+    setImportingStaff(true);
+    setMessage('');
+    setStaffSummary(null);
+    try {
+      const response = await fetch('/api/v1/bulk-import/staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          default_password: 'Cambiar123!',
+          rows: staffRows.map(r => ({
+            first_name: r.nombre, last_name: r.apellido, email: r.email, phone: r.telefono,
+            cedula: r.cedula, role: r.rol || 'teacher',
+          })),
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setStaffSummary(data);
+        setMessage(`✅ ${data.created} docentes/staff creados, ${data.reused} ya existían.`);
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo importar el archivo.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setImportingStaff(false);
+  };
+
   const handleRelink = async () => {
     setRelinking(true);
     setMessage('');
@@ -164,7 +199,7 @@ export const BulkImport: React.FC<Props> = ({ tenantId }) => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Alumnos */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
           <h2 className="font-bold text-slate-700 flex items-center"><Users2 className="w-4 h-4 mr-2 text-rose-600" /> 1. Importar Alumnos</h2>
@@ -277,10 +312,66 @@ export const BulkImport: React.FC<Props> = ({ tenantId }) => {
             </div>
           )}
         </div>
+
+        {/* Docentes/Staff */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+          <h2 className="font-bold text-slate-700 flex items-center"><Briefcase className="w-4 h-4 mr-2 text-rose-600" /> 3. Importar Docentes/Staff</h2>
+          <p className="text-xs text-slate-500">
+            Columnas esperadas: <code className="bg-slate-100 px-1 rounded">{STAFF_COLUMNS.join(', ')}</code>.
+            "rol" debe ser <code className="bg-slate-100 px-1 rounded">teacher</code>, <code className="bg-slate-100 px-1 rounded">admin</code> o <code className="bg-slate-100 px-1 rounded">guard</code> (por defecto "teacher").
+            Se crea una cuenta real por cada persona nueva (contraseña temporal: <code className="bg-slate-100 px-1 rounded">Cambiar123!</code>).
+          </p>
+          <label className="flex items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-lg py-6 cursor-pointer hover:border-rose-400 hover:bg-rose-50">
+            <Upload className="w-4 h-4 text-slate-400" />
+            <span className="text-sm text-slate-500">{staffRows.length > 0 ? `${staffRows.length} filas cargadas` : 'Selecciona el archivo CSV de docentes/staff'}</span>
+            <input
+              type="file" accept=".csv" className="hidden"
+              onChange={e => e.target.files?.[0] && readCsvFile(e.target.files[0], setStaffRows)}
+            />
+          </label>
+
+          {staffRows.length > 0 && (
+            <div className="border border-slate-200 rounded-md overflow-x-auto max-h-40">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-500">
+                  <tr>{STAFF_COLUMNS.map(c => <th key={c} className="px-2 py-1">{c}</th>)}</tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {staffRows.slice(0, 5).map((r, i) => (
+                    <tr key={i}>{STAFF_COLUMNS.map(c => <td key={c} className="px-2 py-1 text-slate-600">{r[c] || '—'}</td>)}</tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <button
+            onClick={handleImportStaff}
+            disabled={importingStaff || staffRows.length === 0}
+            className="flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50 font-semibold text-sm"
+          >
+            {importingStaff ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileSpreadsheet className="w-4 h-4 mr-2" />}
+            Importar {staffRows.length > 0 ? `${staffRows.length} Docentes/Staff` : 'Docentes/Staff'}
+          </button>
+
+          {staffSummary && (
+            <div className="text-xs space-y-1">
+              <p className="text-emerald-600 font-semibold">{staffSummary.created} creados, {staffSummary.reused} ya existían.</p>
+              {staffSummary.errors.length > 0 && (
+                <div className="text-rose-600">
+                  {staffSummary.errors.slice(0, 5).map((e, i) => (
+                    <p key={i} className="flex items-start"><AlertTriangle className="w-3 h-3 mr-1 mt-0.5 flex-shrink-0" /> Fila {e.row}: {e.reason}</p>
+                  ))}
+                  {staffSummary.errors.length > 5 && <p>...y {staffSummary.errors.length - 5} más.</p>}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-3">
-        <h2 className="font-bold text-slate-700 flex items-center"><Link2 className="w-4 h-4 mr-2 text-rose-600" /> 3. Re-vincular por Código de Familia</h2>
+        <h2 className="font-bold text-slate-700 flex items-center"><Link2 className="w-4 h-4 mr-2 text-rose-600" /> 4. Re-vincular por Código de Familia</h2>
         <p className="text-sm text-slate-500">
           Si importaste los archivos en momentos distintos (o agregaste alumnos/padres después), usa este botón para
           revisar todos los códigos de familia del colegio y crear los vínculos padre-alumno que falten. Es seguro

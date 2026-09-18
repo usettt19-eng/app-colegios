@@ -1,5 +1,6 @@
 import { Request, Response, Router } from "express";
 import { supabaseAdmin } from "../supabase";
+import { uploadDocumentFile, getSignedDocumentUrl } from "../services/documentStorage";
 
 const router = Router();
 
@@ -66,7 +67,12 @@ router.get("/purchase-orders", async (req: Request, res: Response) => {
       .order("created_at", { ascending: false });
 
     if (error) return res.status(500).json({ error: "Error al consultar las órdenes de compra." });
-    return res.status(200).json({ success: true, purchaseOrders: data });
+
+    const purchaseOrders = await Promise.all(
+      (data || []).map(async po => ({ ...po, quote_download_url: await getSignedDocumentUrl(po.quote_file_url) }))
+    );
+
+    return res.status(200).json({ success: true, purchaseOrders });
   } catch (error: any) {
     console.error("Error en GET /api/v1/corporate/purchase-orders:", error);
     return res.status(500).json({ error: "Error interno" });
@@ -78,9 +84,18 @@ router.get("/purchase-orders", async (req: Request, res: Response) => {
 // adjunta por quien solicita la compra/contratación de servicio.
 router.post("/purchase-orders", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, vendor_id, requested_by, subtotal, tax_rate, total_cost, quote_file_url, quote_title } = req.body;
+    const { tenant_id, vendor_id, requested_by, subtotal, tax_rate, total_cost, quote_file_data, quote_file_name, quote_title } = req.body;
     if (!tenant_id || !vendor_id || (subtotal === undefined && total_cost === undefined)) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, vendor_id, subtotal o total_cost)" });
+    }
+
+    let quote_file_url: string | null = null;
+    if (quote_file_data) {
+      try {
+        quote_file_url = await uploadDocumentFile(quote_file_data, tenant_id, "purchase-orders", vendor_id, quote_file_name || "cotizacion");
+      } catch (uploadError: any) {
+        return res.status(400).json({ error: uploadError.message || "No se pudo subir la cotización." });
+      }
     }
 
     // El impuesto (ej. ITBMS) se calcula sobre el subtotal, no se pide ya

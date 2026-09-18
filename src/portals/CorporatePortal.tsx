@@ -674,11 +674,16 @@ export const CorporatePortal: React.FC = () => {
                         {!asset.current_assignment && (
                           assignForm.asset_tag === asset.asset_tag ? (
                             <div className="flex items-center justify-end gap-2">
-                              <input
-                                type="text" placeholder="ID de perfil" value={assignForm.assigned_to_profile_id}
+                              <select
+                                value={assignForm.assigned_to_profile_id}
                                 onChange={e => setAssignForm({ ...assignForm, assigned_to_profile_id: e.target.value })}
-                                className="border border-slate-300 rounded-md px-2 py-1 text-xs w-32"
-                              />
+                                className="border border-slate-300 rounded-md px-2 py-1 text-xs w-40"
+                              >
+                                <option value="">Selecciona el staff...</option>
+                                {staffOptions.map(s => (
+                                  <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>
+                                ))}
+                              </select>
                               <button
                                 onClick={() => handleAssignAssetTo(asset.asset_tag)}
                                 disabled={assetsLoading}

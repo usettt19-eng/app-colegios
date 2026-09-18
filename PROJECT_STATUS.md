@@ -2,7 +2,7 @@
 
 > Documento vivo. Actualízalo cada vez que se cierre o se abra una tarea importante.
 > Regla operativa: cada vez que Claude avance en algo, actualiza este archivo en el mismo commit. Para retomar contexto del proyecto, leer este archivo primero — no releer toda la sesión.
-> Última actualización: 2026-09-18 (Expediente del Alumno consolidado, lado colegio)
+> Última actualización: 2026-09-18 (backlog técnico interno resuelto)
 
 ## 1. Qué es esto
 
@@ -97,9 +97,17 @@ Cada tabla tiene `tenant_id` (modelo multi-tenant). El repo vive en GitHub, rama
   - Dos endpoints nuevos de apoyo en `attendance.ts`: `GET /api/v1/attendance/history/:student_id` (historial completo + resumen) y `GET /api/v1/attendance/alerts-history/:student_id` (todas las alertas, resueltas e irresueltas — el endpoint viejo `/alert/:student_id` solo devuelve las pendientes y se dejó intacto para no romper su uso operativo actual).
   - Typecheck limpio. Verificado: FKs de todos los embeds nuevos revisadas vía `pg_constraint` (sin ambigüedad, incluida la nueva `attendance_records.class_id → classes`); servidor local sirve el Portal Admin en HTTP 200 tras los cambios (Playwright no está instalado en el proyecto, ver nota de sesión anterior).
 
+- **Backlog técnico interno resuelto** (el usuario pidió "haz lo que tenemos en backlog"; se acordó vía AskUserQuestion resolver primero el backlog técnico interno §5.2 completo + luego ir uno por uno con los ítems "Core" del roadmap grande §5.1). De los 7 puntos de §5.2 se resolvieron los 4 que no estaban bloqueados por falta de auth real o de credenciales externas:
+  - **Importar Docentes/Staff (CSV)**: nueva tarjeta "3. Importar Docentes/Staff" en `BulkImport.tsx` (mismo patrón que Alumnos/Padres), conectada al endpoint `POST /api/v1/bulk-import/staff` que ya existía en el backend sin UI.
+  - **UX de asignación de activos IT**: en Portal ERP → Patrimonio, "Asignar al Staff" pedía un ID de perfil escrito a mano (mismo bug que tenía Nómina antes de corregirse). Ahora es un `<select>` poblado desde `staffOptions` (ya cargado para el fix de Nómina).
+  - **Mi Expediente en el Portal Docente**: nueva pestaña "Mi Expediente" donde el docente sube y ve sus propios documentos (título, CV, certificaciones, etc.) reutilizando `StaffDocuments.tsx` — se le agregó un prop `canReview` (default `true`, no rompe el uso existente del lado Admin) para ocultarle al docente los botones de Verificar/Rechazar sobre su propio expediente.
+  - **Subida real de archivos a Supabase Storage** (antes los tres flujos de documentos mockeaban `file_url`/`quote_file_url` con solo el nombre del archivo, sin subir el binario): nuevo bucket **privado** `documents` en Storage + servicio `backend/services/documentStorage.ts` (`uploadDocumentFile` sube un data URL base64 y devuelve la ruta interna; `getSignedDocumentUrl` genera una URL firmada de 1 hora para verlo/descargarlo — privado porque estos documentos incluyen cédulas, contratos, antecedentes). Conectado en `student_documents` (Admisiones + Portal de Padres/Ficha Médica), `staff_documents` (Portal Docente + Admin) y `purchase_orders.quote_file_url` (Portal de Finanzas): los formularios ahora leen el archivo real con `FileReader.readAsDataURL` (máx. 10MB) en vez de simular el nombre, y los endpoints `GET` que listan documentos/cotizaciones devuelven un `download_url`/`quote_download_url` firmado para el botón "Ver". **Efecto secundario necesario**: el límite de body de Express estaba en el default de 100kb (`server.ts`), insuficiente incluso para las fotos de perfil existentes — se subió a 15mb para que quepan PDFs escaneados.
+  - **No resueltos, siguen bloqueados** (documentado el motivo, no se tocaron): RBAC granular y migración de 4 portales a auth real (grandes, se acordó no empezarlos sin más contexto de negocio), SafeSmartPickup (falta que el usuario dé las credenciales de API), separación de roles de aprobación en Finanzas (bloqueado por lo mismo que RBAC: sin auth real no hay quién distinguir).
+  - Typecheck limpio; los 4 portales tocados (Admin, Docente, Finanzas, Admisiones) sirven HTTP 200 en el servidor local tras los cambios.
+
 ## 4. Tarea en curso
 
-Ninguna en este momento. Última tarea completada: Expediente del Alumno consolidado del lado del colegio (ver arriba), incluida la corrección del bug de asistencia/alertas nunca migrado a producción.
+Empezando ahora, uno por uno, con los ítems "Core" del roadmap grande (§5.1) — el usuario pidió continuar "todo poco a poco, uno detrás de otro" sin elegir un orden específico, así que se sigue el orden en que aparecen en §5.1 salvo que el usuario redirija. Backlog técnico interno (§5.2) ya resuelto (ver arriba) en lo que no estaba bloqueado.
 
 Tarea completada justo antes: personal expatriado/honorarios profesionales + primera versión (sin desglose) del acumulado mensual de nómina.
 
@@ -169,11 +177,11 @@ El usuario está pegando, sección por sección, una lista de posibles mejoras p
 - **RBAC granular por sección de portal para el staff** (mencionado por el usuario, no iniciado): hoy solo existe `profiles.role` (admin/teacher/guard/parent/super_admin) sin permisos finos dentro de cada portal — cualquier admin ve/edita todo el Admin/ERP/Finanzas. Probablemente requiera: tabla de permisos (por rol o por perfil individual, quizá ligada a `departments`), middleware de autorización por sección, y UI en Admin para asignar permisos. Bloqueado en la práctica por que la mayoría de portales (Admin, ERP, Finanzas, Admisiones) todavía no tienen Fase 2 auth real — probablemente haya que resolver eso primero o en paralelo.
 - Migrar Admisiones, Portal Corporativo, Portal de Finanzas y Portal Admin (aparte de Super Admin) a auth real (Fase 2).
 - Integración saliente con SafeSmartPickup (pendiente de credenciales de API del usuario).
-- Subida real de archivos a Supabase Storage para `student_documents`, `staff_documents` y las cotizaciones de `purchase_orders` (los tres mockean `file_url`/`quote_file_url` con solo el nombre del archivo, no suben el binario).
-- El asset assignment (`assigned_to_profile_id`) en Portal ERP → Patrimonio IT probablemente tenga el mismo problema de UX que tenía Nómina (pedir un profile_id a mano en vez de un select) — no confirmado/revisado todavía, pendiente de revisar si se vuelve a reportar.
-- Conectar la pestaña "Importar Datos" del frontend al endpoint `POST /api/v1/bulk-import/staff` (ya existe en el backend, falta la tarjeta "3. Importar Docentes/Staff" en `BulkImport.tsx`, mismo patrón que alumnos/padres).
-- Decidir quién puede aprobar cotizaciones vs. quién programa pagos vs. quién da la aprobación final en el Portal de Finanzas — hoy cualquiera que entre al portal puede hacer las 3 cosas (no hay separación de roles todavía, similar a como el resto de portales sin Fase 2 auth funcionan hoy).
-- UI para que el propio docente vea/suba su expediente desde el Portal Docente (hoy `staff_documents` solo tiene UI del lado Admin; el backend ya lo permitiría vía RLS `profile_id = auth.uid()`).
+- ~~Subida real de archivos a Supabase Storage para `student_documents`, `staff_documents` y las cotizaciones de `purchase_orders`~~ **RESUELTO** — ver sección 3/4.
+- ~~El asset assignment en Portal ERP → Patrimonio IT tenía el mismo problema de UX que Nómina~~ **RESUELTO** — ver sección 3/4.
+- ~~Conectar "Importar Datos" al endpoint `POST /api/v1/bulk-import/staff`~~ **RESUELTO** — ver sección 3/4.
+- Decidir quién puede aprobar cotizaciones vs. quién programa pagos vs. quién da la aprobación final en el Portal de Finanzas — hoy cualquiera que entre al portal puede hacer las 3 cosas (no hay separación de roles todavía). Sigue bloqueado por lo mismo que RBAC: sin Fase 2 auth en Finanzas no hay quién distinguir un rol de otro.
+- ~~UI para que el propio docente vea/suba su expediente desde el Portal Docente~~ **RESUELTO** — ver sección 3/4.
 
 ## 6. Notas operativas / cosas que ya se rompieron una vez (para no repetirlas)
 
