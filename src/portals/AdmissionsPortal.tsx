@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ClipboardList, UserPlus, FileUp, FileSignature, CheckCircle2, Loader2, ArrowRight, Stethoscope, IdCard, GraduationCap as GradIcon, FileText, Camera, Search } from 'lucide-react';
+import { AdmissionsCRM } from './AdmissionsCRM';
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -43,6 +44,10 @@ interface GradeLevel {
 }
 
 export const AdmissionsPortal: React.FC = () => {
+  const [mode, setMode] = useState<'pipeline' | 'matricula'>('pipeline');
+  const [convertingProspectId, setConvertingProspectId] = useState<string | null>(null);
+  const [prefillNote, setPrefillNote] = useState('');
+
   const [step, setStep] = useState<StepId>(1);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -57,6 +62,25 @@ export const AdmissionsPortal: React.FC = () => {
 
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
   const [selectedGradeLevelId, setSelectedGradeLevelId] = useState('');
+
+  const handleStartMatriculaFromProspect = (prospect: {
+    id: string; student_first_name: string; student_last_name: string;
+    desired_grade_level_id: string | null; parent_name: string | null; parent_email: string | null; parent_phone: string | null;
+  }) => {
+    setStep(1);
+    setStudentId(null);
+    setResolvedParentId(null);
+    setStudentPhoto(null);
+    setStudentForm({
+      first_name: prospect.student_first_name, last_name: prospect.student_last_name,
+      grade_section_id: '', cedula: '', birth_date: '', previous_school: '', address: '',
+    });
+    setSelectedGradeLevelId(prospect.desired_grade_level_id || '');
+    setConvertingProspectId(prospect.id);
+    const contactParts = [prospect.parent_name, prospect.parent_email, prospect.parent_phone].filter(Boolean);
+    setPrefillNote(contactParts.length > 0 ? `Contacto del prospecto: ${contactParts.join(' · ')}. Vincula o crea a este responsable abajo.` : '');
+    setMode('matricula');
+  };
 
   useEffect(() => {
     fetch(`/api/v1/grade-settings/levels?tenant_id=${DEMO_TENANT_ID}`)
@@ -181,6 +205,14 @@ export const AdmissionsPortal: React.FC = () => {
         setResolvedParentId(guardianLinks[0]?.parent_id || null);
         setMessage('✅ Expediente del alumno creado exitosamente.');
         setStep(2);
+        if (convertingProspectId) {
+          fetch(`/api/v1/admissions-crm/prospects/${convertingProspectId}/link-student`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ student_id: data.student.id }),
+          }).catch(() => {});
+          setConvertingProspectId(null);
+        }
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo crear el expediente.'));
       }
@@ -290,7 +322,31 @@ export const AdmissionsPortal: React.FC = () => {
             <p className="text-sm text-slate-500">Proceso de matrícula para alumnos de primer ingreso</p>
           </div>
         </div>
+        <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+          <button
+            onClick={() => setMode('pipeline')}
+            className={`px-3 py-1.5 rounded-md text-sm font-bold ${mode === 'pipeline' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            Pipeline de Prospectos
+          </button>
+          <button
+            onClick={() => setMode('matricula')}
+            className={`px-3 py-1.5 rounded-md text-sm font-bold ${mode === 'matricula' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            Matricular Alumno
+          </button>
+        </div>
       </div>
+
+      {mode === 'pipeline' && (
+        <AdmissionsCRM tenantId={DEMO_TENANT_ID} onConvert={handleStartMatriculaFromProspect} />
+      )}
+
+      {mode === 'matricula' && (
+      <>
+      {prefillNote && (
+        <div className="bg-amber-50 text-amber-800 p-3 rounded-lg border border-amber-200 text-sm">{prefillNote}</div>
+      )}
 
       {/* Stepper */}
       <div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
@@ -606,6 +662,8 @@ export const AdmissionsPortal: React.FC = () => {
             </a>
           )}
         </div>
+      )}
+      </>
       )}
     </div>
   );

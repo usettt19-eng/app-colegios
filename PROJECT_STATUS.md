@@ -2,7 +2,7 @@
 
 > Documento vivo. Actualízalo cada vez que se cierre o se abra una tarea importante.
 > Regla operativa: cada vez que Claude avance en algo, actualiza este archivo en el mismo commit. Para retomar contexto del proyecto, leer este archivo primero — no releer toda la sesión.
-> Última actualización: 2026-09-18 (backlog técnico interno resuelto)
+> Última actualización: 2026-09-18 (CRM de Admisiones — Pipeline de Prospectos)
 
 ## 1. Qué es esto
 
@@ -105,9 +105,17 @@ Cada tabla tiene `tenant_id` (modelo multi-tenant). El repo vive en GitHub, rama
   - **No resueltos, siguen bloqueados** (documentado el motivo, no se tocaron): RBAC granular y migración de 4 portales a auth real (grandes, se acordó no empezarlos sin más contexto de negocio), SafeSmartPickup (falta que el usuario dé las credenciales de API), separación de roles de aprobación en Finanzas (bloqueado por lo mismo que RBAC: sin auth real no hay quién distinguir).
   - Typecheck limpio; los 4 portales tocados (Admin, Docente, Finanzas, Admisiones) sirven HTTP 200 en el servidor local tras los cambios.
 
+- **CRM de Admisiones — Pipeline de Prospectos** (primer ítem "Core" del roadmap grande §5.1, elegido por el usuario tras "empieza con el CRM de admisiones"): antes Admisiones solo arrancaba cuando ya se creaba el expediente del alumno (Portal de Admisiones, flujo de 4 pasos ya existente); no había ningún lugar para registrar el proceso de "venta"/matrícula desde el primer contacto de una familia interesada.
+  - Nueva tabla `admission_prospects` (migración `admissions_crm_prospects`): datos del alumno postulante, grado deseado (`grade_levels`), contacto del padre/madre/acudiente, `source` (cómo nos conoció), `stage` (enum `interesado` → `visita_agendada` → `examen_admision` → `matriculado` / `perdido`, con `stage_updated_at`), `visit_date`, `exam_date`, `exam_score`, `notes`, `assigned_to` (staff responsable), `lost_reason`, y `converted_student_id` (se llena cuando el prospecto se convierte en un alumno real).
+  - Backend nuevo `backend/routes/admissionsCrm.ts`, montado en `/api/v1/admissions-crm`: `GET/POST /prospects`, `PATCH /prospects/:id` (datos de seguimiento sin cambiar etapa), `POST /prospects/:id/stage` (mover de etapa; `perdido` exige `lost_reason`), `POST /prospects/:id/link-student` (vincula el prospecto con el expediente real ya creado y lo pasa a `matriculado`).
+  - Nuevo componente `src/portals/AdmissionsCRM.tsx`: tablero por columnas (una por etapa) en vez de drag-and-drop, con tarjetas expandibles por prospecto (fecha de visita, fecha/resultado de examen, staff asignado, notas, botón "Avanzar a [siguiente etapa]", botón "Marcar como Perdido" con motivo obligatorio, botón "Convertir a Matrícula").
+  - **`AdmissionsPortal.tsx` ahora tiene dos modos** (toggle arriba, igual al patrón `studentsSubView` de `AdminAdvancedPortal`): "Pipeline de Prospectos" (el nuevo CRM, modo por defecto) y "Matricular Alumno" (el flujo de 4 pasos que ya existía, sin tocar su lógica interna). El botón "Convertir a Matrícula" de una tarjeta del pipeline llama `handleStartMatriculaFromProspect`: cambia a modo "Matricular Alumno", precarga nombre/apellido y grado deseado en el paso 1, y muestra un aviso con el contacto del prospecto (nombre/email/teléfono) para que el staff vincule o cree a ese responsable manualmente — no se automatizó la creación del padre porque `parent_name` es un solo campo de texto libre en el CRM (mientras que crear un perfil real pide nombre y apellido por separado más contraseña), así que evitar adivinar esa separación fue la decisión más segura. Al crear el expediente exitosamente, si venía de un prospecto, se llama automáticamente a `link-student` para cerrar el círculo (el prospecto pasa a `matriculado` y queda vinculado al `student_id` real).
+  - Verificado: FKs de `admission_prospects` (`assigned_to→profiles`, `converted_student_id→students`, `desired_grade_level_id→grade_levels`) sin ambigüedad vía `pg_constraint`; insert/delete de prueba contra producción confirmó que la tabla y el enum de etapas funcionan; typecheck limpio; Portal de Admisiones sirve HTTP 200 en local tras los cambios.
+  - **Fuera de alcance a propósito** (quedan en el roadmap §5.1 "Avanzado" sin tocar): examen de admisión en línea (hoy `exam_score` se digita a mano tras un examen presencial) y firma electrónica de contratos (la firma de contrato de matrícula, `contracts.ts`, ya existe desde antes y sigue igual).
+
 ## 4. Tarea en curso
 
-Empezando ahora, uno por uno, con los ítems "Core" del roadmap grande (§5.1) — el usuario pidió continuar "todo poco a poco, uno detrás de otro" sin elegir un orden específico, así que se sigue el orden en que aparecen en §5.1 salvo que el usuario redirija. Backlog técnico interno (§5.2) ya resuelto (ver arriba) en lo que no estaba bloqueado.
+Ninguna en este momento. El usuario pidió continuar "todo poco a poco, uno detrás de otro" con los ítems "Core" del roadmap grande (§5.1); el CRM de Admisiones (ver arriba) fue el primero. Backlog técnico interno (§5.2) ya resuelto en lo que no estaba bloqueado.
 
 Tarea completada justo antes: personal expatriado/honorarios profesionales + primera versión (sin desglose) del acumulado mensual de nómina.
 
@@ -135,7 +143,7 @@ El usuario está pegando, sección por sección, una lista de posibles mejoras p
 
 **Admisiones y Marketing (CRM Escolar)**
 - Core:
-  - Seguimiento de Prospectos (CRM tipo Trello/Kanban): Admisiones empezaría desde que un padre pregunta por información, no desde la matrícula. Pipeline: Interesado → Visita agendada → Examen de admisión → Matriculado.
+  - ~~Seguimiento de Prospectos (CRM tipo Trello/Kanban)~~ **RESUELTO** — ver sección 3/4 (Pipeline de Prospectos).
 - Avanzado (diferenciadores):
   - Exámenes de Admisión en Línea: prueba diagnóstica básica que el prospecto rinde directamente en el portal antes de ser aceptado.
   - Firma Electrónica de Contratos: integración con DocuSign (o firma interna) para el "Contrato de Servicios Educativos" anual, sin papel en la matrícula.

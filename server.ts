@@ -51,6 +51,7 @@ import gradeSettingsRoutes from "./backend/routes/gradeSettings";
 import bulkImportRoutes from "./backend/routes/bulkImport";
 import transportRoutes from "./backend/routes/transport";
 import corporateRoutes from "./backend/routes/corporate";
+import admissionsCrmRoutes from "./backend/routes/admissionsCrm";
 import { startAutoReleaseJob } from "./backend/jobs/autoRelease";
 import { startRecurringExpenseReminderJob } from "./backend/jobs/recurringExpenseReminders";
 
@@ -86,6 +87,7 @@ app.use("/api/v1/grade-settings", gradeSettingsRoutes);
 app.use("/api/v1/bulk-import", bulkImportRoutes);
 app.use("/api/v1/transport", transportRoutes);
 app.use("/api/v1/corporate", corporateRoutes);
+app.use("/api/v1/admissions-crm", admissionsCrmRoutes);
 
 // Iniciar procesos en segundo plano
 startAutoReleaseJob();
