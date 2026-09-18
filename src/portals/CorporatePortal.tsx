@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Package, Monitor, Briefcase, TrendingDown, Plus, CheckCircle, Laptop, PenTool, HardDrive, Wallet, Users, Calculator, Loader2, Truck, ShoppingCart } from 'lucide-react';
+import { Package, Monitor, Briefcase, TrendingDown, Plus, CheckCircle, Laptop, PenTool, HardDrive, Wallet, Users, Calculator, Loader2, Truck, ShoppingCart, CalendarOff, UserCog, X } from 'lucide-react';
 
 // Contexto de demostración: en producción tenant_id / requested_by vienen del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -38,7 +38,37 @@ interface Employee {
   pay_type: 'monthly' | 'hourly';
   hourly_rate: number | null;
   hourly_prep_percent: number | null;
+  vacation_days_balance: number | null;
   profiles?: { first_name: string; last_name: string; role: string };
+}
+
+interface LeaveRequest {
+  id: string;
+  employee_id: string;
+  leave_type: 'vacation' | 'sick' | 'personal' | 'other';
+  start_date: string;
+  end_date: string;
+  days_requested: number;
+  reason: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  hr_employees?: { profile_id: string; vacation_days_balance: number | null; profiles?: { first_name: string; last_name: string } };
+}
+
+interface SubstituteAssignment {
+  id: string;
+  class_id: string;
+  date: string;
+  notes: string | null;
+  classes?: { name: string; courses?: { name: string } };
+  original_teacher?: { first_name: string; last_name: string };
+  substitute_teacher?: { first_name: string; last_name: string };
+}
+
+interface ClassOption {
+  id: string;
+  name: string;
+  teacher_id: string | null;
+  courses?: { name: string };
 }
 
 interface StaffOption {
@@ -112,7 +142,7 @@ interface PurchaseOrder {
 }
 
 export const CorporatePortal: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'assets' | 'consumables' | 'payroll' | 'procurement'>('assets');
+  const [activeTab, setActiveTab] = useState<'assets' | 'consumables' | 'payroll' | 'procurement' | 'hr_leave'>('assets');
   const [message, setMessage] = useState('');
 
   // --- Patrimonio IT ---
@@ -153,6 +183,154 @@ export const CorporatePortal: React.FC = () => {
   const [monthlySummary, setMonthlySummary] = useState<PayrollMonthSummary[]>([]);
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
 
+  // --- Ausencias y Suplencias ---
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [substituteAssignments, setSubstituteAssignments] = useState<SubstituteAssignment[]>([]);
+  const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
+  const [hrLeaveEmployees, setHrLeaveEmployees] = useState<Employee[]>([]);
+  const [hrLeaveStaffOptions, setHrLeaveStaffOptions] = useState<StaffOption[]>([]);
+  const [hrLeaveLoading, setHrLeaveLoading] = useState(false);
+  const [leaveForm, setLeaveForm] = useState({ employee_id: '', leave_type: 'vacation', start_date: '', end_date: '', days_requested: '', reason: '' });
+  const [substituteForm, setSubstituteForm] = useState({ class_id: '', date: '', substitute_teacher_id: '', notes: '' });
+  const [vacationBalanceDrafts, setVacationBalanceDrafts] = useState<Record<string, string>>({});
+
+  const loadHrLeaveData = async () => {
+    setHrLeaveLoading(true);
+    try {
+      const [leaveRes, subRes, employeesRes, staffRes, classesRes] = await Promise.all([
+        fetch(`/api/v1/hr-leave/requests?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/hr-leave/substitute-assignments?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/corporate/employees?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/hierarchy/staff?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/academics/classes?tenant_id=${DEMO_TENANT_ID}`),
+      ]);
+      const leaveData = await leaveRes.json();
+      const subData = await subRes.json();
+      const employeesData = await employeesRes.json();
+      const staffData = await staffRes.json();
+      const classesData = await classesRes.json();
+      setLeaveRequests(leaveData.leaveRequests || []);
+      setSubstituteAssignments(subData.substituteAssignments || []);
+      setHrLeaveEmployees(employeesData.employees || []);
+      setHrLeaveStaffOptions(staffData.staff || []);
+      setClassOptions(classesData.classes || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+    setHrLeaveLoading(false);
+  };
+
+  const handleCreateLeaveRequest = async () => {
+    if (!leaveForm.employee_id || !leaveForm.start_date || !leaveForm.end_date || !leaveForm.days_requested) {
+      setMessage('❌ Completa empleado, fechas y días solicitados.');
+      return;
+    }
+    setHrLeaveLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/hr-leave/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, ...leaveForm, days_requested: Number(leaveForm.days_requested) }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Solicitud de ausencia registrada, pendiente de aprobación.');
+        setLeaveForm({ employee_id: '', leave_type: 'vacation', start_date: '', end_date: '', days_requested: '', reason: '' });
+        loadHrLeaveData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo registrar la solicitud.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setHrLeaveLoading(false);
+  };
+
+  const handleDecideLeaveRequest = async (id: string, status: 'approved' | 'rejected') => {
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/hr-leave/requests/${id}/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, approved_by: DEMO_REQUESTER_ID }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage(status === 'approved' ? '✅ Solicitud aprobada.' : '✅ Solicitud rechazada.');
+        loadHrLeaveData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo decidir la solicitud.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
+  const handleSaveVacationBalance = async (employeeId: string) => {
+    const value = vacationBalanceDrafts[employeeId];
+    if (value === undefined) return;
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/hr-leave/employees/${employeeId}/vacation-balance`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vacation_days_balance: Number(value) }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Saldo de vacaciones actualizado.');
+        loadHrLeaveData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo actualizar el saldo.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
+  const handleCreateSubstituteAssignment = async () => {
+    if (!substituteForm.class_id || !substituteForm.date || !substituteForm.substitute_teacher_id) {
+      setMessage('❌ Completa el grupo, la fecha y el suplente.');
+      return;
+    }
+    setHrLeaveLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/hr-leave/substitute-assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, created_by: DEMO_REQUESTER_ID, ...substituteForm }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Suplencia asignada. Se refleja automáticamente en las horas de la planilla de ambos docentes.');
+        setSubstituteForm({ class_id: '', date: '', substitute_teacher_id: '', notes: '' });
+        loadHrLeaveData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo asignar la suplencia.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setHrLeaveLoading(false);
+  };
+
+  const handleDeleteSubstituteAssignment = async (id: string) => {
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/hr-leave/substitute-assignments/${id}`, { method: 'DELETE' });
+      const data = await response.json();
+      if (data.success) {
+        setSubstituteAssignments(prev => prev.filter(s => s.id !== id));
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo eliminar la suplencia.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
   const loadPayrollData = async () => {
     try {
       const [employeesRes, runsRes, staffRes, tenantRes, rulesRes, summaryRes] = await Promise.all([
@@ -185,6 +363,7 @@ export const CorporatePortal: React.FC = () => {
     if (activeTab === 'procurement') loadProcurementData();
     if (activeTab === 'assets') loadAssets();
     if (activeTab === 'consumables') loadConsumables();
+    if (activeTab === 'hr_leave') loadHrLeaveData();
   }, [activeTab]);
 
   const loadAssets = async () => {
@@ -594,6 +773,12 @@ export const CorporatePortal: React.FC = () => {
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'procurement' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
           <Truck className="w-4 h-4 mr-2" /> Proveedores y Compras
+        </button>
+        <button
+          onClick={() => setActiveTab('hr_leave')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'hr_leave' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <CalendarOff className="w-4 h-4 mr-2" /> Ausencias y Suplencias
         </button>
       </div>
 
@@ -1333,6 +1518,217 @@ export const CorporatePortal: React.FC = () => {
                   ))}
                 </tbody>
               </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Ausencias y Suplencias */}
+      {activeTab === 'hr_leave' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
+              <h2 className="font-bold text-slate-700 flex items-center"><CalendarOff className="w-4 h-4 mr-2 text-blue-600" /> Solicitar Vacaciones / Incapacidad</h2>
+              <select
+                value={leaveForm.employee_id}
+                onChange={e => setLeaveForm({ ...leaveForm, employee_id: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Selecciona el empleado...</option>
+                {hrLeaveEmployees.map(e => (
+                  <option key={e.id} value={e.id}>
+                    {e.profiles ? `${e.profiles.first_name} ${e.profiles.last_name}` : e.id} (saldo: {e.vacation_days_balance ?? 0} días)
+                  </option>
+                ))}
+              </select>
+              <div className="grid grid-cols-2 gap-3">
+                <select
+                  value={leaveForm.leave_type}
+                  onChange={e => setLeaveForm({ ...leaveForm, leave_type: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="vacation">Vacaciones</option>
+                  <option value="sick">Incapacidad</option>
+                  <option value="personal">Permiso personal</option>
+                  <option value="other">Otro</option>
+                </select>
+                <input
+                  type="number" placeholder="Días solicitados" value={leaveForm.days_requested}
+                  onChange={e => setLeaveForm({ ...leaveForm, days_requested: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  type="date" value={leaveForm.start_date}
+                  onChange={e => setLeaveForm({ ...leaveForm, start_date: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <input
+                  type="date" value={leaveForm.end_date}
+                  onChange={e => setLeaveForm({ ...leaveForm, end_date: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <input
+                type="text" placeholder="Motivo (opcional)" value={leaveForm.reason}
+                onChange={e => setLeaveForm({ ...leaveForm, reason: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={handleCreateLeaveRequest}
+                disabled={hrLeaveLoading}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm"
+              >
+                {hrLeaveLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                Solicitar
+              </button>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
+              <h2 className="font-bold text-slate-700 flex items-center"><UserCog className="w-4 h-4 mr-2 text-blue-600" /> Asignar Suplencia</h2>
+              <p className="text-xs text-slate-500">Reasigna las clases de un docente ausente, un día específico, a un suplente. Se refleja automáticamente en las horas de planilla de ambos.</p>
+              <select
+                value={substituteForm.class_id}
+                onChange={e => setSubstituteForm({ ...substituteForm, class_id: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Selecciona el grupo/clase...</option>
+                {classOptions.map(c => (
+                  <option key={c.id} value={c.id}>{c.courses?.name || c.name} — {c.name}</option>
+                ))}
+              </select>
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  type="date" value={substituteForm.date}
+                  onChange={e => setSubstituteForm({ ...substituteForm, date: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <select
+                  value={substituteForm.substitute_teacher_id}
+                  onChange={e => setSubstituteForm({ ...substituteForm, substitute_teacher_id: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Suplente...</option>
+                  {hrLeaveStaffOptions.map(s => (
+                    <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>
+                  ))}
+                </select>
+              </div>
+              <input
+                type="text" placeholder="Notas (opcional)" value={substituteForm.notes}
+                onChange={e => setSubstituteForm({ ...substituteForm, notes: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={handleCreateSubstituteAssignment}
+                disabled={hrLeaveLoading}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm"
+              >
+                {hrLeaveLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                Asignar Suplencia
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 bg-slate-50 border-b border-slate-100">
+              <h2 className="font-bold text-slate-700">Solicitudes de Ausencia</h2>
+            </div>
+            {hrLeaveLoading ? (
+              <div className="flex items-center justify-center py-12 text-slate-400">
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Cargando...
+              </div>
+            ) : leaveRequests.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay solicitudes de ausencia.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {leaveRequests.map(lr => (
+                  <div key={lr.id} className="p-4 flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <p className="font-semibold text-slate-700 text-sm">
+                        {lr.hr_employees?.profiles ? `${lr.hr_employees.profiles.first_name} ${lr.hr_employees.profiles.last_name}` : 'Empleado'} — {lr.leave_type}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        {lr.start_date} a {lr.end_date} · {lr.days_requested} días{lr.reason ? ` · ${lr.reason}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                        lr.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :
+                        lr.status === 'rejected' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                      }`}>{lr.status}</span>
+                      {lr.status === 'pending' && (
+                        <>
+                          <button onClick={() => handleDecideLeaveRequest(lr.id, 'approved')} className="text-xs font-bold text-emerald-600 hover:underline">Aprobar</button>
+                          <button onClick={() => handleDecideLeaveRequest(lr.id, 'rejected')} className="text-xs font-bold text-rose-600 hover:underline">Rechazar</button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 bg-slate-50 border-b border-slate-100">
+              <h2 className="font-bold text-slate-700">Saldo de Vacaciones por Empleado</h2>
+            </div>
+            {hrLeaveEmployees.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Sin empleados dados de alta en nómina.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {hrLeaveEmployees.map(e => (
+                  <div key={e.id} className="p-4 flex items-center justify-between gap-2 flex-wrap">
+                    <p className="font-semibold text-slate-700 text-sm">{e.profiles ? `${e.profiles.first_name} ${e.profiles.last_name}` : e.id}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400">Saldo actual: {e.vacation_days_balance ?? 0} días</span>
+                      <input
+                        type="number" placeholder="Ajustar saldo" defaultValue={e.vacation_days_balance ?? ''}
+                        onChange={ev => setVacationBalanceDrafts({ ...vacationBalanceDrafts, [e.id]: ev.target.value })}
+                        className="w-24 border border-slate-300 rounded-md px-2 py-1 text-xs"
+                      />
+                      <button
+                        onClick={() => handleSaveVacationBalance(e.id)}
+                        className="text-xs font-bold text-blue-600 hover:text-blue-800"
+                      >
+                        Guardar
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 bg-slate-50 border-b border-slate-100">
+              <h2 className="font-bold text-slate-700">Suplencias Asignadas</h2>
+            </div>
+            {substituteAssignments.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay suplencias asignadas.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {substituteAssignments.map(s => (
+                  <div key={s.id} className="p-4 flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <p className="font-semibold text-slate-700 text-sm">{s.classes?.courses?.name || s.classes?.name} · {s.date}</p>
+                      <p className="text-xs text-slate-400">
+                        Titular: {s.original_teacher ? `${s.original_teacher.first_name} ${s.original_teacher.last_name}` : '—'} → Suplente: {s.substitute_teacher ? `${s.substitute_teacher.first_name} ${s.substitute_teacher.last_name}` : '—'}
+                        {s.notes ? ` · ${s.notes}` : ''}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteSubstituteAssignment(s.id)}
+                      className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 p-1 rounded"
+                      title="Eliminar"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>

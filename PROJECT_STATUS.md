@@ -2,7 +2,7 @@
 
 > Documento vivo. Actualízalo cada vez que se cierre o se abra una tarea importante.
 > Regla operativa: cada vez que Claude avance en algo, actualiza este archivo en el mismo commit. Para retomar contexto del proyecto, leer este archivo primero — no releer toda la sesión.
-> Última actualización: 2026-09-18 (Control de Morosidad Restrictivo)
+> Última actualización: 2026-09-18 (Vacaciones/Incapacidades + Asignación de Suplencias)
 
 ## 1. Qué es esto
 
@@ -127,9 +127,18 @@ Cada tabla tiene `tenant_id` (modelo multi-tenant). El repo vive en GitHub, rama
   - **Decisión de diseño de alcance**: el bloqueo se aplica solo en el frontend del Portal de Padres (que sí tiene auth real de Fase 2), NO en los endpoints compartidos `GET /api/v1/bulletins/:student_id` ni `GET /api/v1/enrollments/:student_id` — esos los sigue usando sin restricción el Expediente del Alumno del lado Admin (`StudentFile.tsx`) y otros módulos internos, que no deben bloquearse por mora del padre.
   - Verificado: valor por defecto confirmado en producción (`tuition_block_enabled=false`, `threshold=2`); typecheck limpio; Portal Admin y Portal de Padres sirven HTTP 200 en local tras los cambios.
 
+- **Control de Vacaciones/Incapacidades + Asignación de Suplencias** (cuarto ítem "Core" del roadmap grande §5.1, los dos puntos de RRHH juntos porque comparten pantalla y lógica de horas): nueva pestaña "Ausencias y Suplencias" en el Portal ERP.
+  - `hr_employees` ganó `vacation_days_balance` (default 0 — **sin valor por defecto asumido**, cada colegio/contrato define sus propios días; se ajusta manualmente desde la nueva pestaña).
+  - Nueva tabla `leave_requests`: empleado solicita (tipo vacaciones/incapacidad/personal/otro, fechas, **días solicitados escritos a mano** — no se infieren restando fechas porque contar días hábiles vs. calendario depende de la política de cada colegio, mismo criterio de no inventar reglas de negocio usado antes en esta sesión), gerente/RRHH aprueba o rechaza. Al aprobar una de tipo `vacation`, se descuenta automáticamente del saldo (`hr_employees.vacation_days_balance`), validando que no quede negativo; las de tipo `sick`/`personal`/`other` quedan en el historial sin tocar el saldo de vacaciones.
+  - Nueva tabla `substitute_assignments` (grupo/clase + fecha específica + docente titular + docente suplente, `UNIQUE(class_id, date)` evita doble asignación): Coordinación reasigna, un día puntual, las clases de un docente ausente a un suplente.
+  - **`computeScheduledHours()` (el motor de pago por horas de `corporate.ts`, construido en una sesión anterior) ahora contempla las suplencias**: para el titular, resta las horas de cualquier bloque cubierto por un suplente ese día específico; para el suplente, le suma esas horas aunque la clase no sea suya — así el pago por horas de la planilla refleja quién dio la clase realmente, sin que Coordinación tenga que ajustar nada a mano en Nómina.
+  - Nuevo backend `backend/routes/hrLeave.ts` (`/api/v1/hr-leave`): CRUD de solicitudes de ausencia + decisión de aprobación, ajuste manual de saldo de vacaciones, CRUD de asignación de suplencias.
+  - Verificado: FKs de `substitute_assignments` desambiguadas explícitamente en los embeds (tiene **3** relaciones distintas hacia `profiles`: `original_teacher_id`, `substitute_teacher_id`, `created_by` — mismo cuidado de siempre por el bug de PostgREST 300 Multiple Choices); insert/delete de prueba contra producción; typecheck limpio; Portal ERP sirve HTTP 200 en local tras los cambios.
+  - **Fuera de alcance a propósito** (queda en el roadmap §5.1 "Avanzado"): Reserva de Espacios (Facility Booking) y Evaluación Docente 360° no se tocaron.
+
 ## 4. Tarea en curso
 
-Ninguna en este momento. El usuario pidió continuar "todo poco a poco, uno detrás de otro" con los ítems "Core" del roadmap grande (§5.1); CRM de Admisiones, Becas/Descuentos y Control de Morosidad (ver arriba) son los primeros tres. Backlog técnico interno (§5.2) ya resuelto en lo que no estaba bloqueado.
+Ninguna en este momento. El usuario pidió continuar "todo poco a poco, uno detrás de otro" con los ítems "Core" del roadmap grande (§5.1); CRM de Admisiones, Becas/Descuentos, Control de Morosidad y Vacaciones/Suplencias (ver arriba) son los primeros cuatro. Backlog técnico interno (§5.2) ya resuelto en lo que no estaba bloqueado.
 
 Tarea completada justo antes: personal expatriado/honorarios profesionales + primera versión (sin desglose) del acumulado mensual de nómina.
 
@@ -181,8 +190,8 @@ El usuario está pegando, sección por sección, una lista de posibles mejoras p
 
 **Recursos Humanos e Infraestructura**
 - Core:
-  - Control de Vacaciones e Incapacidades (Ausencias): empleado solicita → gerente aprueba → RRHH descuenta del saldo anual.
-  - Asignación de Suplencias: si un docente se reporta enfermo, Coordinación reasigna sus clases del día a un suplente, afectando el pago por horas de ambos. *Nota: se conectaría directo con el cálculo de horas por distributivo ya construido (`computeScheduledHours`, ver sección 3) — habría que restar las horas del titular y sumárselas al suplente ese día específico.*
+  - ~~Control de Vacaciones e Incapacidades (Ausencias)~~ **RESUELTO** — ver sección 3/4.
+  - ~~Asignación de Suplencias~~ **RESUELTO** — ver sección 3/4.
 - Avanzado (diferenciadores):
   - Reserva de Espacios (Facility Booking): calendario para reservar auditorio/laboratorio/proyector/sala de cómputo y evitar conflictos.
   - Evaluación Docente 360°: alumnos + coordinación evalúan al profesor anualmente, genera puntaje de desempeño para RRHH.

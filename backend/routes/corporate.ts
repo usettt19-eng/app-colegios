@@ -706,20 +706,30 @@ router.post("/employees", async (req: Request, res: Response) => {
 // (class_schedules de sus classes) dentro de un rango de fechas, contando
 // cada bloque una vez por cada día del periodo que coincida con su
 // day_of_week (0=domingo...6=sábado, igual que Date#getDay()).
+//
+// Contempla las suplencias (substitute_assignments, ver hrLeave.ts): si
+// otro docente cubrió una de sus clases un día específico, esas horas NO
+// se cuentan para el titular ese día; y si este docente cubrió como
+// suplente la clase de alguien más, esas horas SÍ se le suman a él, aunque
+// esa clase no sea suya en `classes.teacher_id`.
 async function computeScheduledHours(tenantId: string, teacherProfileId: string, periodStart: string, periodEnd: string): Promise<number> {
-  const { data: classes } = await supabaseAdmin
-    .from("classes")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .eq("teacher_id", teacherProfileId);
+  const [{ data: ownClasses }, { data: coveredAsSubstitute }, { data: coveredByOthers }] = await Promise.all([
+    supabaseAdmin.from("classes").select("id").eq("tenant_id", tenantId).eq("teacher_id", teacherProfileId),
+    supabaseAdmin.from("substitute_assignments").select("class_id, date").eq("tenant_id", tenantId).eq("substitute_teacher_id", teacherProfileId).gte("date", periodStart).lte("date", periodEnd),
+    supabaseAdmin.from("substitute_assignments").select("class_id, date").eq("tenant_id", tenantId).eq("original_teacher_id", teacherProfileId).gte("date", periodStart).lte("date", periodEnd),
+  ]);
 
-  const classIds = (classes || []).map(c => c.id);
-  if (classIds.length === 0) return 0;
+  const ownClassIds = new Set((ownClasses || []).map(c => c.id));
+  const substituteCoverage = coveredAsSubstitute || [];
+  const excludedDays = new Set((coveredByOthers || []).map(s => `${s.class_id}|${s.date}`));
+
+  const allClassIds = Array.from(new Set([...ownClassIds, ...substituteCoverage.map(s => s.class_id)]));
+  if (allClassIds.length === 0) return 0;
 
   const { data: blocks } = await supabaseAdmin
     .from("class_schedules")
-    .select("day_of_week, start_time, end_time")
-    .in("class_id", classIds);
+    .select("class_id, day_of_week, start_time, end_time")
+    .in("class_id", allClassIds);
 
   if (!blocks || blocks.length === 0) return 0;
 
@@ -734,9 +744,15 @@ async function computeScheduledHours(tenantId: string, teacherProfileId: string,
   const end = new Date(`${periodEnd}T00:00:00`);
   while (cursor <= end) {
     const dayOfWeek = cursor.getDay();
+    const dateStr = cursor.toISOString().split("T")[0];
     for (const block of blocks) {
-      if (block.day_of_week === dayOfWeek) {
+      if (block.day_of_week !== dayOfWeek) continue;
+      const key = `${block.class_id}|${dateStr}`;
+      if (ownClassIds.has(block.class_id)) {
+        if (excludedDays.has(key)) continue; // otro docente lo cubrió ese día
         totalHours += blockHours(block.start_time, block.end_time);
+      } else if (substituteCoverage.some(s => s.class_id === block.class_id && s.date === dateStr)) {
+        totalHours += blockHours(block.start_time, block.end_time); // cubrió como suplente
       }
     }
     cursor.setDate(cursor.getDate() + 1);
