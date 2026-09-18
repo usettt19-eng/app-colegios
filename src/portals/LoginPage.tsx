@@ -40,7 +40,7 @@ export const LoginPage: React.FC = () => {
             <label className="block text-xs text-slate-500 mb-1">Correo electrónico</label>
             <input
               type="email" required value={email} onChange={e => setEmail(e.target.value)}
-              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
               placeholder="padre.demo@colegiodemo.edu"
             />
           </div>
@@ -48,7 +48,7 @@ export const LoginPage: React.FC = () => {
             <label className="block text-xs text-slate-500 mb-1">Contraseña</label>
             <input
               type="password" required value={password} onChange={e => setPassword(e.target.value)}
-              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
               placeholder="••••••••"
             />
           </div>
