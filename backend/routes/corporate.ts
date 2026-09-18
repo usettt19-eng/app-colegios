@@ -62,7 +62,7 @@ router.get("/purchase-orders", async (req: Request, res: Response) => {
 
     const { data, error } = await supabaseAdmin
       .from("purchase_orders")
-      .select("*, vendors(name, service_type), profiles(first_name, last_name)")
+      .select("*, vendors(name, service_type), departments(name), profiles!purchase_orders_requested_by_fkey(first_name, last_name)")
       .eq("tenant_id", tenant_id)
       .order("created_at", { ascending: false });
 
@@ -84,7 +84,7 @@ router.get("/purchase-orders", async (req: Request, res: Response) => {
 // adjunta por quien solicita la compra/contratación de servicio.
 router.post("/purchase-orders", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, vendor_id, requested_by, subtotal, tax_rate, total_cost, quote_file_data, quote_file_name, quote_title } = req.body;
+    const { tenant_id, vendor_id, requested_by, department_id, subtotal, tax_rate, total_cost, quote_file_data, quote_file_name, quote_title } = req.body;
     if (!tenant_id || !vendor_id || (subtotal === undefined && total_cost === undefined)) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, vendor_id, subtotal o total_cost)" });
     }
@@ -116,7 +116,7 @@ router.post("/purchase-orders", async (req: Request, res: Response) => {
     const { data: purchaseOrder, error } = await supabaseAdmin
       .from("purchase_orders")
       .insert({
-        tenant_id, vendor_id, requested_by: requested_by || null,
+        tenant_id, vendor_id, requested_by: requested_by || null, department_id: department_id || null,
         subtotal: finalSubtotal, tax_rate: finalTaxRate, tax_amount: finalTaxAmount, total_cost: finalTotal,
         status: "pending_approval",
         quote_file_url: quote_file_url || null, quote_title: quote_title || null,
@@ -129,6 +129,35 @@ router.post("/purchase-orders", async (req: Request, res: Response) => {
       return res.status(500).json({ error: "Error al registrar la orden de compra." });
     }
 
+    // Aviso (no bloqueante) si esta orden deja al departamento sobre su
+    // presupuesto anual asignado — Contabilidad decide si igual la aprueba.
+    let budgetWarning: string | null = null;
+    if (department_id) {
+      const year = new Date().getFullYear();
+      const { data: budget } = await supabaseAdmin
+        .from("department_budgets")
+        .select("amount")
+        .eq("department_id", department_id)
+        .eq("year", year)
+        .maybeSingle();
+
+      if (budget) {
+        const { data: yearOrders } = await supabaseAdmin
+          .from("purchase_orders")
+          .select("total_cost, created_at")
+          .eq("department_id", department_id)
+          .neq("status", "cancelled");
+
+        const spentThisYear = (yearOrders || [])
+          .filter(po => new Date(po.created_at).getFullYear() === year)
+          .reduce((sum, po) => sum + Number(po.total_cost), 0);
+
+        if (spentThisYear > Number(budget.amount)) {
+          budgetWarning = `Este departamento ya superó su presupuesto anual (${year}): $${spentThisYear.toFixed(2)} gastados de $${Number(budget.amount).toFixed(2)} asignados.`;
+        }
+      }
+    }
+
     await supabaseAdmin.from("audit_logs").insert({
       tenant_id,
       event_type: "FINANCE",
@@ -136,9 +165,107 @@ router.post("/purchase-orders", async (req: Request, res: Response) => {
       actor_name: "Procurement System",
     });
 
-    return res.status(201).json({ success: true, message: "Orden de compra creada, pendiente de aprobación.", purchaseOrder });
+    return res.status(201).json({ success: true, message: "Orden de compra creada, pendiente de aprobación.", purchaseOrder, budgetWarning });
   } catch (error: any) {
     console.error("Error en POST /api/v1/corporate/purchase-orders:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// ==========================================
+// PRESUPUESTO ANUAL POR DEPARTAMENTO
+// ==========================================
+
+// GET /api/v1/corporate/department-budgets?tenant_id=...&year=...
+router.get("/department-budgets", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, year } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    let query = supabaseAdmin
+      .from("department_budgets")
+      .select("*, departments(name)")
+      .eq("tenant_id", tenant_id);
+
+    if (year) query = query.eq("year", Number(year));
+
+    const { data, error } = await query.order("year", { ascending: false });
+    if (error) return res.status(500).json({ error: "Error al consultar los presupuestos." });
+    return res.status(200).json({ success: true, budgets: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/corporate/department-budgets:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/corporate/department-budgets
+// Asigna (o reemplaza, si ya existía para ese año) el presupuesto anual de
+// un departamento.
+router.post("/department-budgets", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, department_id, year, amount, notes } = req.body;
+    if (!tenant_id || !department_id || !year || amount === undefined) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, department_id, year, amount)" });
+    }
+
+    const { data: budget, error } = await supabaseAdmin
+      .from("department_budgets")
+      .upsert({ tenant_id, department_id, year: Number(year), amount: Number(amount), notes: notes || null }, { onConflict: "department_id, year" })
+      .select("*, departments(name)")
+      .single();
+
+    if (error || !budget) {
+      console.error("Error al asignar presupuesto:", error);
+      return res.status(500).json({ error: "No se pudo asignar el presupuesto." });
+    }
+
+    return res.status(201).json({ success: true, message: "Presupuesto asignado.", budget });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/corporate/department-budgets:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// GET /api/v1/corporate/department-budgets/status?tenant_id=...&year=...
+// Para cada departamento con presupuesto asignado ese año, cuánto ha
+// gastado en órdenes de compra (no canceladas) vs. lo asignado.
+router.get("/department-budgets/status", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, year } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+    const targetYear = year ? Number(year) : new Date().getFullYear();
+
+    const { data: budgets } = await supabaseAdmin
+      .from("department_budgets")
+      .select("*, departments(name)")
+      .eq("tenant_id", tenant_id)
+      .eq("year", targetYear);
+
+    const { data: orders } = await supabaseAdmin
+      .from("purchase_orders")
+      .select("department_id, total_cost, created_at")
+      .eq("tenant_id", tenant_id)
+      .neq("status", "cancelled")
+      .not("department_id", "is", null);
+
+    const status = (budgets || []).map(b => {
+      const spent = (orders || [])
+        .filter(o => o.department_id === b.department_id && new Date(o.created_at).getFullYear() === targetYear)
+        .reduce((sum, o) => sum + Number(o.total_cost), 0);
+      return {
+        department_id: b.department_id,
+        department_name: (b as any).departments?.name || null,
+        year: targetYear,
+        budget_amount: Number(b.amount),
+        spent: Number(spent.toFixed(2)),
+        remaining: Number((Number(b.amount) - spent).toFixed(2)),
+        over_budget: spent > Number(b.amount),
+      };
+    });
+
+    return res.status(200).json({ success: true, status });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/corporate/department-budgets/status:", error);
     return res.status(500).json({ error: "Error interno" });
   }
 });

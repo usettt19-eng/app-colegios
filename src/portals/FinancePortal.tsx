@@ -1,5 +1,32 @@
 import React, { useEffect, useState } from 'react';
-import { DollarSign, TrendingUp, TrendingDown, Wallet, Loader2, Plus, FileUp, CalendarClock, CheckCircle2, Landmark, Repeat } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Wallet, Loader2, Plus, FileUp, CalendarClock, CheckCircle2, Landmark, Repeat, Building2, Upload, AlertTriangle } from 'lucide-react';
+
+// Parser de CSV simple (mismo patrón que BulkImport.tsx): separador coma,
+// soporta campos entre comillas con comas internas.
+function parseCsv(text: string): Record<string, string>[] {
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lines.length === 0) return [];
+  const parseLine = (line: string): string[] => {
+    const cells: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') inQuotes = !inQuotes;
+      else if (char === ',' && !inQuotes) { cells.push(current.trim()); current = ''; }
+      else current += char;
+    }
+    cells.push(current.trim());
+    return cells;
+  };
+  const headers = parseLine(lines[0]).map(h => h.toLowerCase().trim());
+  return lines.slice(1).map(line => {
+    const cells = parseLine(line);
+    const row: Record<string, string> = {};
+    headers.forEach((h, i) => { row[h] = cells[i] || ''; });
+    return row;
+  });
+}
 
 // Contexto de demostración: en producción tenant_id / profile_id vienen del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -79,7 +106,39 @@ interface TaxSummary {
   totalTax: number;
 }
 
-type TabId = 'flujo' | 'cotizaciones' | 'programar';
+interface Department {
+  id: string;
+  name: string;
+}
+
+interface DepartmentBudgetStatus {
+  department_id: string;
+  department_name: string | null;
+  year: number;
+  budget_amount: number;
+  spent: number;
+  remaining: number;
+  over_budget: boolean;
+}
+
+interface ReconciliationRow {
+  date: string;
+  amount: number;
+  reference: string;
+  description?: string;
+  invoice_number?: string;
+  invoice_amount?: number;
+  reason?: string;
+}
+
+interface ReconciliationResult {
+  matched: ReconciliationRow[];
+  mismatched: ReconciliationRow[];
+  unmatched: ReconciliationRow[];
+  alreadyReconciled: ReconciliationRow[];
+}
+
+type TabId = 'flujo' | 'cotizaciones' | 'programar' | 'presupuestos' | 'conciliacion';
 
 const TX_LABEL: Record<Transaction['type'], string> = {
   income: 'Ingreso (alumno)',
@@ -99,8 +158,19 @@ export const FinancePortal: React.FC = () => {
   // --- Cotizaciones y Compras ---
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
-  const [poForm, setPoForm] = useState({ vendor_id: '', subtotal: '', tax_rate: '7', quote_title: '' });
+  const [poForm, setPoForm] = useState({ vendor_id: '', department_id: '', subtotal: '', tax_rate: '7', quote_title: '' });
   const [quoteFile, setQuoteFile] = useState<File | null>(null);
+
+  // --- Presupuesto Anual por Departamento ---
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [budgetStatus, setBudgetStatus] = useState<DepartmentBudgetStatus[]>([]);
+  const [budgetForm, setBudgetForm] = useState({ department_id: '', year: String(new Date().getFullYear()), amount: '', notes: '' });
+  const [budgetLoading, setBudgetLoading] = useState(false);
+
+  // --- Conciliación Bancaria ---
+  const [bankRows, setBankRows] = useState<Record<string, string>[]>([]);
+  const [reconciling, setReconciling] = useState(false);
+  const [reconciliationResult, setReconciliationResult] = useState<ReconciliationResult | null>(null);
 
   // --- Gastos Recurrentes Mensuales (energía, agua, internet...) ---
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
@@ -132,25 +202,47 @@ export const FinancePortal: React.FC = () => {
 
   const loadProcurement = async () => {
     try {
-      const [vendorsRes, poRes, recurringRes] = await Promise.all([
+      const [vendorsRes, poRes, recurringRes, deptRes] = await Promise.all([
         fetch(`/api/v1/corporate/vendors?tenant_id=${DEMO_TENANT_ID}`),
         fetch(`/api/v1/corporate/purchase-orders?tenant_id=${DEMO_TENANT_ID}`),
         fetch(`/api/v1/corporate/recurring-expenses?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/hierarchy/departments?tenant_id=${DEMO_TENANT_ID}`),
       ]);
       const vendorsData = await vendorsRes.json();
       const poData = await poRes.json();
       const recurringData = await recurringRes.json();
+      const deptData = await deptRes.json();
       setVendors(vendorsData.vendors || []);
       setPurchaseOrders(poData.purchaseOrders || []);
       setRecurringExpenses(recurringData.recurringExpenses || []);
+      setDepartments(deptData.departments || []);
     } catch {
       setMessage('❌ No se pudo conectar con el servidor SIS.');
     }
   };
 
+  const loadBudgetStatus = async () => {
+    setBudgetLoading(true);
+    try {
+      const [deptRes, statusRes] = await Promise.all([
+        fetch(`/api/v1/hierarchy/departments?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/corporate/department-budgets/status?tenant_id=${DEMO_TENANT_ID}&year=${budgetForm.year}`),
+      ]);
+      const deptData = await deptRes.json();
+      const statusData = await statusRes.json();
+      setDepartments(deptData.departments || []);
+      setBudgetStatus(statusData.status || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+    setBudgetLoading(false);
+  };
+
   useEffect(() => {
     if (activeTab === 'flujo') loadCashflow();
     if (activeTab === 'cotizaciones' || activeTab === 'programar') loadProcurement();
+    if (activeTab === 'presupuestos') loadBudgetStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   const handleCreateRecurringExpense = async () => {
@@ -213,6 +305,72 @@ export const FinancePortal: React.FC = () => {
     }
   };
 
+  const handleCreateBudget = async () => {
+    if (!budgetForm.department_id || !budgetForm.year || !budgetForm.amount) {
+      setMessage('❌ Selecciona el departamento, el año y el monto.');
+      return;
+    }
+    setBudgetLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/corporate/department-budgets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          department_id: budgetForm.department_id,
+          year: Number(budgetForm.year),
+          amount: Number(budgetForm.amount),
+          notes: budgetForm.notes || null,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Presupuesto asignado.');
+        setBudgetForm({ ...budgetForm, department_id: '', amount: '', notes: '' });
+        loadBudgetStatus();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo asignar el presupuesto.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setBudgetLoading(false);
+  };
+
+  const handleUploadBankStatement = async (file: File | undefined) => {
+    if (!file) return;
+    setMessage('');
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const rows = parseCsv(String(reader.result || ''));
+      setBankRows(rows);
+      setReconciling(true);
+      setReconciliationResult(null);
+      try {
+        const response = await fetch('/api/v1/finance/bank-reconciliation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenant_id: DEMO_TENANT_ID,
+            rows: rows.map(r => ({ date: r.fecha, amount: Number(r.monto), reference: r.referencia, description: r.descripcion })),
+          }),
+        });
+        const data = await response.json();
+        if (data.success) {
+          setReconciliationResult({ matched: data.matched, mismatched: data.mismatched, unmatched: data.unmatched, alreadyReconciled: data.alreadyReconciled });
+          setMessage(`✅ Conciliación procesada: ${data.matched.length} pagos conciliados automáticamente.`);
+        } else {
+          setMessage('❌ ' + (data.error || 'No se pudo procesar el extracto.'));
+        }
+      } catch {
+        setMessage('❌ Error de conexión.');
+      }
+      setReconciling(false);
+    };
+    reader.readAsText(file);
+  };
+
   const handleCreateQuote = async () => {
     if (!poForm.vendor_id || !poForm.subtotal || !quoteFile) {
       setMessage('❌ Selecciona el proveedor, el subtotal y adjunta la cotización.');
@@ -232,6 +390,7 @@ export const FinancePortal: React.FC = () => {
         body: JSON.stringify({
           tenant_id: DEMO_TENANT_ID,
           vendor_id: poForm.vendor_id,
+          department_id: poForm.department_id || null,
           requested_by: DEMO_ACTOR_ID,
           subtotal: Number(poForm.subtotal),
           tax_rate: Number(poForm.tax_rate || 0),
@@ -242,8 +401,8 @@ export const FinancePortal: React.FC = () => {
       });
       const data = await response.json();
       if (data.success) {
-        setMessage('✅ Cotización subida, pendiente de aprobación.');
-        setPoForm({ vendor_id: '', subtotal: '', tax_rate: '7', quote_title: '' });
+        setMessage(data.budgetWarning ? `✅ Cotización subida, pendiente de aprobación. ⚠️ ${data.budgetWarning}` : '✅ Cotización subida, pendiente de aprobación.');
+        setPoForm({ vendor_id: '', department_id: '', subtotal: '', tax_rate: '7', quote_title: '' });
         setQuoteFile(null);
         loadProcurement();
       } else {
@@ -368,6 +527,18 @@ export const FinancePortal: React.FC = () => {
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'programar' ? 'bg-green-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
           <CalendarClock className="w-4 h-4 mr-2" /> Programar Pagos
+        </button>
+        <button
+          onClick={() => setActiveTab('presupuestos')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'presupuestos' ? 'bg-green-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <Building2 className="w-4 h-4 mr-2" /> Presupuesto por Departamento
+        </button>
+        <button
+          onClick={() => setActiveTab('conciliacion')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'conciliacion' ? 'bg-green-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <Landmark className="w-4 h-4 mr-2" /> Conciliación Bancaria
         </button>
       </div>
 
@@ -547,6 +718,14 @@ export const FinancePortal: React.FC = () => {
                 className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               />
             </div>
+            <select
+              value={poForm.department_id}
+              onChange={e => setPoForm({ ...poForm, department_id: e.target.value })}
+              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            >
+              <option value="">Departamento (opcional, para control de presupuesto)</option>
+              {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <input
                 type="number" placeholder="Subtotal (antes de impuesto)" value={poForm.subtotal}
@@ -703,6 +882,160 @@ export const FinancePortal: React.FC = () => {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Presupuesto Anual por Departamento */}
+      {activeTab === 'presupuestos' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <h2 className="font-bold text-slate-700 flex items-center"><Building2 className="w-4 h-4 mr-2 text-green-600" /> Asignar Presupuesto Anual</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <select
+                value={budgetForm.department_id}
+                onChange={e => setBudgetForm({ ...budgetForm, department_id: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                <option value="">Departamento...</option>
+                {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+              <input
+                type="number" placeholder="Año" value={budgetForm.year}
+                onChange={e => setBudgetForm({ ...budgetForm, year: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+              <input
+                type="number" placeholder="Presupuesto (USD)" value={budgetForm.amount}
+                onChange={e => setBudgetForm({ ...budgetForm, amount: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+              <input
+                type="text" placeholder="Notas (opcional)" value={budgetForm.notes}
+                onChange={e => setBudgetForm({ ...budgetForm, notes: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <button
+              onClick={handleCreateBudget}
+              disabled={budgetLoading}
+              className="flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 font-semibold text-sm"
+            >
+              {budgetLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+              Asignar Presupuesto
+            </button>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 bg-slate-50 border-b border-slate-100">
+              <h2 className="font-bold text-slate-700">Estado del Presupuesto {budgetForm.year}</h2>
+            </div>
+            {budgetLoading ? (
+              <div className="flex items-center justify-center py-12 text-slate-400">
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Cargando...
+              </div>
+            ) : budgetStatus.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Sin presupuestos asignados para {budgetForm.year}.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {budgetStatus.map(b => (
+                  <div key={b.department_id} className="p-4 flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <p className="font-semibold text-slate-700 text-sm flex items-center">
+                        {b.department_name}
+                        {b.over_budget && <AlertTriangle className="w-3.5 h-3.5 ml-1.5 text-rose-500" />}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        Gastado: ${b.spent.toFixed(2)} de ${b.budget_amount.toFixed(2)} asignados ({b.remaining >= 0 ? `$${b.remaining.toFixed(2)} restante` : `$${Math.abs(b.remaining).toFixed(2)} sobre presupuesto`})
+                      </p>
+                    </div>
+                    <span className={`px-2 py-1 rounded-full text-xs font-bold ${b.over_budget ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                      {b.over_budget ? 'Sobre presupuesto' : 'Dentro de presupuesto'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Conciliación Bancaria */}
+      {activeTab === 'conciliacion' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <h2 className="font-bold text-slate-700 flex items-center"><Landmark className="w-4 h-4 mr-2 text-green-600" /> Subir Extracto Bancario</h2>
+            <p className="text-sm text-slate-500">
+              CSV con columnas <code className="bg-slate-100 px-1 rounded">fecha, monto, referencia, descripcion</code>. La <strong>referencia</strong> debe ser el número de factura
+              (lo que el padre pone al transferir) — así se hace match automático y se marca la factura como pagada. Si no coincide o el monto es distinto, queda para revisión manual.
+            </p>
+            <label className="flex items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-lg py-6 cursor-pointer hover:border-green-400 hover:bg-green-50">
+              <Upload className="w-4 h-4 text-slate-400" />
+              <span className="text-sm text-slate-500">{bankRows.length > 0 ? `${bankRows.length} filas cargadas` : 'Selecciona el archivo CSV del extracto'}</span>
+              <input
+                type="file" accept=".csv" className="hidden"
+                onChange={e => handleUploadBankStatement(e.target.files?.[0])}
+              />
+            </label>
+            {reconciling && (
+              <div className="flex items-center justify-center py-6 text-slate-400">
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Procesando conciliación...
+              </div>
+            )}
+          </div>
+
+          {reconciliationResult && (
+            <>
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="p-4 bg-emerald-50 border-b border-emerald-100">
+                  <h2 className="font-bold text-emerald-700">✅ Conciliados Automáticamente ({reconciliationResult.matched.length})</h2>
+                </div>
+                {reconciliationResult.matched.length === 0 ? (
+                  <p className="p-6 text-sm text-slate-400">Ninguno en esta carga.</p>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {reconciliationResult.matched.map((r, i) => (
+                      <div key={i} className="p-3 flex items-center justify-between text-sm">
+                        <span className="text-slate-600">{r.date} · Factura {r.invoice_number} · Ref: {r.reference}</span>
+                        <span className="font-bold text-emerald-600">${Number(r.amount).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {reconciliationResult.mismatched.length > 0 && (
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="p-4 bg-amber-50 border-b border-amber-100">
+                    <h2 className="font-bold text-amber-700">⚠️ Monto no coincide — revisión manual ({reconciliationResult.mismatched.length})</h2>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {reconciliationResult.mismatched.map((r, i) => (
+                      <div key={i} className="p-3 text-sm">
+                        <p className="text-slate-600">{r.date} · Ref: {r.reference} · Depósito: ${Number(r.amount).toFixed(2)}</p>
+                        <p className="text-xs text-amber-600">{r.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {reconciliationResult.unmatched.length > 0 && (
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="p-4 bg-rose-50 border-b border-rose-100">
+                    <h2 className="font-bold text-rose-700">❌ Sin factura coincidente — revisión manual ({reconciliationResult.unmatched.length})</h2>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {reconciliationResult.unmatched.map((r, i) => (
+                      <div key={i} className="p-3 text-sm">
+                        <p className="text-slate-600">{r.date} · Ref: {r.reference} · ${Number(r.amount).toFixed(2)}</p>
+                        <p className="text-xs text-rose-500">{r.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

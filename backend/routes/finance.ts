@@ -800,4 +800,96 @@ router.post("/webhook/stripe", async (req: Request, res: Response) => {
   }
 });
 
+// ==========================================
+// CONCILIACIÓN BANCARIA (RECONCILIACIÓN AUTOMÁTICA)
+// ==========================================
+
+// POST /api/v1/finance/bank-reconciliation
+// Recibe las filas de un extracto bancario (ya parseado a JSON en el
+// cliente desde el CSV/Excel subido) e intenta hacer match automático
+// contra facturas abiertas usando el número de factura como referencia de
+// la transferencia (lo que el padre normalmente pone al transferir). Solo
+// concilia automáticamente cuando el monto coincide exacto; si el número
+// de referencia no corresponde a ninguna factura, o el monto no coincide,
+// lo deja para revisión manual en vez de adivinar.
+router.post("/bank-reconciliation", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, rows } = req.body as { tenant_id: string; rows: { date: string; amount: number; reference: string; description?: string }[] };
+    if (!tenant_id || !Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, rows)" });
+    }
+
+    const matched: any[] = [];
+    const mismatched: any[] = [];
+    const unmatched: any[] = [];
+    const alreadyReconciled: any[] = [];
+
+    for (const row of rows) {
+      if (!row.reference || row.amount === undefined || row.amount === null) {
+        unmatched.push({ ...row, reason: "Fila sin referencia o monto." });
+        continue;
+      }
+
+      const { data: existingPayment } = await supabaseAdmin
+        .from("payments")
+        .select("id")
+        .eq("transaction_reference", row.reference)
+        .maybeSingle();
+      if (existingPayment) {
+        alreadyReconciled.push(row);
+        continue;
+      }
+
+      const { data: invoice } = await supabaseAdmin
+        .from("invoices")
+        .select("id, tenant_id, invoice_number, amount, status, parent_id")
+        .eq("tenant_id", tenant_id)
+        .eq("invoice_number", row.reference.trim())
+        .maybeSingle();
+
+      if (!invoice) {
+        unmatched.push({ ...row, reason: "Ninguna factura coincide con esa referencia." });
+        continue;
+      }
+      if (invoice.status === "paid") {
+        unmatched.push({ ...row, reason: `La factura ${invoice.invoice_number} ya estaba marcada como pagada.` });
+        continue;
+      }
+      if (Number(invoice.amount) !== Number(row.amount)) {
+        mismatched.push({ ...row, invoice_number: invoice.invoice_number, invoice_amount: Number(invoice.amount), reason: "El monto del depósito no coincide con el monto de la factura." });
+        continue;
+      }
+
+      await supabaseAdmin.from("payments").insert({
+        tenant_id, invoice_id: invoice.id, amount_paid: row.amount,
+        payment_date: row.date, method: "bank_transfer", transaction_reference: row.reference,
+      });
+      await supabaseAdmin.from("invoices").update({ status: "paid" }).eq("id", invoice.id);
+
+      if (invoice.parent_id) {
+        await supabaseAdmin.from("notifications").insert({
+          tenant_id, user_id: invoice.parent_id,
+          title: "¡Pago Recibido!",
+          message: `Hemos recibido tu pago por $${row.amount} de la factura ${invoice.invoice_number} (conciliación bancaria). ¡Gracias!`,
+          type: "success",
+        });
+      }
+
+      matched.push({ ...row, invoice_number: invoice.invoice_number });
+    }
+
+    await supabaseAdmin.from("audit_logs").insert({
+      tenant_id,
+      event_type: "FINANCE",
+      description: `Conciliación bancaria procesada: ${matched.length} pagos conciliados automáticamente, ${mismatched.length} con monto distinto, ${unmatched.length} sin factura coincidente.`,
+      actor_name: "Finance System",
+    });
+
+    return res.status(200).json({ success: true, matched, mismatched, unmatched, alreadyReconciled });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/finance/bank-reconciliation:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 export default router;

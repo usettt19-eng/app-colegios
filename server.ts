@@ -53,6 +53,8 @@ import transportRoutes from "./backend/routes/transport";
 import corporateRoutes from "./backend/routes/corporate";
 import admissionsCrmRoutes from "./backend/routes/admissionsCrm";
 import hrLeaveRoutes from "./backend/routes/hrLeave";
+import facilitiesRoutes from "./backend/routes/facilities";
+import teacherEvaluationsRoutes from "./backend/routes/teacherEvaluations";
 import { startAutoReleaseJob } from "./backend/jobs/autoRelease";
 import { startRecurringExpenseReminderJob } from "./backend/jobs/recurringExpenseReminders";
 
@@ -90,6 +92,8 @@ app.use("/api/v1/transport", transportRoutes);
 app.use("/api/v1/corporate", corporateRoutes);
 app.use("/api/v1/admissions-crm", admissionsCrmRoutes);
 app.use("/api/v1/hr-leave", hrLeaveRoutes);
+app.use("/api/v1/facilities", facilitiesRoutes);
+app.use("/api/v1/teacher-evaluations", teacherEvaluationsRoutes);
 
 // Iniciar procesos en segundo plano
 startAutoReleaseJob();

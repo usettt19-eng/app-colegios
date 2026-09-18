@@ -2,7 +2,7 @@
 
 > Documento vivo. Actualízalo cada vez que se cierre o se abra una tarea importante.
 > Regla operativa: cada vez que Claude avance en algo, actualiza este archivo en el mismo commit. Para retomar contexto del proyecto, leer este archivo primero — no releer toda la sesión.
-> Última actualización: 2026-09-18 (Vacaciones/Incapacidades + Asignación de Suplencias)
+> Última actualización: 2026-09-18 (Avanzados de RRHH y Finanzas: espacios, evaluación 360°, presupuesto, conciliación bancaria)
 
 ## 1. Qué es esto
 
@@ -134,11 +134,20 @@ Cada tabla tiene `tenant_id` (modelo multi-tenant). El repo vive en GitHub, rama
   - **`computeScheduledHours()` (el motor de pago por horas de `corporate.ts`, construido en una sesión anterior) ahora contempla las suplencias**: para el titular, resta las horas de cualquier bloque cubierto por un suplente ese día específico; para el suplente, le suma esas horas aunque la clase no sea suya — así el pago por horas de la planilla refleja quién dio la clase realmente, sin que Coordinación tenga que ajustar nada a mano en Nómina.
   - Nuevo backend `backend/routes/hrLeave.ts` (`/api/v1/hr-leave`): CRUD de solicitudes de ausencia + decisión de aprobación, ajuste manual de saldo de vacaciones, CRUD de asignación de suplencias.
   - Verificado: FKs de `substitute_assignments` desambiguadas explícitamente en los embeds (tiene **3** relaciones distintas hacia `profiles`: `original_teacher_id`, `substitute_teacher_id`, `created_by` — mismo cuidado de siempre por el bug de PostgREST 300 Multiple Choices); insert/delete de prueba contra producción; typecheck limpio; Portal ERP sirve HTTP 200 en local tras los cambios.
-  - **Fuera de alcance a propósito** (queda en el roadmap §5.1 "Avanzado"): Reserva de Espacios (Facility Booking) y Evaluación Docente 360° no se tocaron.
+  - *(Reserva de Espacios y Evaluación Docente 360° quedaron para después — ver el bloque siguiente, ya construidas.)*
+
+- **Ítems "Avanzado" de RRHH y Finanzas** (el usuario pidió "sigue con los avanzados de RRHH y finanzas" tras terminar todo el "Core"): cuatro features nuevas.
+  - **Reserva de Espacios (Facility Booking)**: nuevas tablas `facilities` (catálogo de espacios: auditorio, laboratorio, etc.) y `facility_bookings` (fecha + hora inicio/fin + motivo). Nueva pestaña "Reserva de Espacios" en el Portal ERP: registrar espacios, reservarlos, ver la agenda y cancelar. El backend (`backend/routes/facilities.ts`, `/api/v1/facilities`) valida que no se crucen dos reservas del mismo espacio en un horario que se superponga (conflicto real de horario, no solo de fecha).
+  - **Evaluación Docente 360°**: nuevas tablas `teacher_evaluation_cycles` (ej. "Evaluación Anual 2026", se puede abrir/cerrar) y `teacher_evaluations` (evaluador = alumno o coordinación, 4 dimensiones en escala 1-5: enseñanza, puntualidad, comunicación, equidad). Nueva pestaña "Evaluación Docente 360°" en el Portal ERP: crear/cerrar ciclos, Coordinación evalúa directo desde ahí, y una tabla de "Puntaje de Desempeño por Docente" que promedia por separado lo que dicen los alumnos vs. Coordinación y calcula un puntaje general. Backend en `backend/routes/teacherEvaluations.ts` (`/api/v1/teacher-evaluations`).
+    - **Limitación reconocida a propósito**: el modelo de datos ya soporta `evaluator_role='student'`, pero **no se construyó una UI para que el alumno la responda** — el sistema no tiene todavía un login propio de alumno (solo el Portal de Padres, que actúa en nombre del hijo); construir esa encuesta implicaría decidir primero cómo la contesta un alumno sin cuenta propia, y no se quiso inventar ese flujo sin pedirlo explícitamente. Queda como *siguiente paso natural* si se pide.
+  - **Control de Presupuesto Anual por Departamento**: nueva tabla `department_budgets` (departamento + año + monto asignado, único por departamento+año). `purchase_orders` ganó `department_id` (opcional, para no romper las cotizaciones ya existentes que no tenían departamento). Al subir una cotización con departamento asignado, `POST /api/v1/corporate/purchase-orders` calcula cuánto lleva gastado ese departamento en el año y, si esta orden lo deja sobre presupuesto, devuelve un **aviso** (`budgetWarning`, no bloqueante — el roadmap pedía "avisar", no impedir la compra; Contabilidad decide si igual la aprueba). Nueva pestaña "Presupuesto por Departamento" en el Portal de Finanzas: asignar presupuesto anual y ver el estado (gastado vs. asignado) de cada departamento.
+    - **Bug real corregido de paso**: el `GET /api/v1/corporate/purchase-orders` existente hacía `.select("*, profiles(...)")`, pero `purchase_orders` tiene **3** relaciones distintas hacia `profiles` (`requested_by`, `approved_by`, `scheduled_by`) — ambigüedad de PostgREST 300 Multiple Choices nunca antes disparada porque nada en el frontend leía ese campo todavía. Se corrigió con el hint explícito `profiles!purchase_orders_requested_by_fkey(...)` (mismo cuidado de siempre en esta sesión) y de paso se agregó el embed de `departments(name)`.
+  - **Integración Bancaria (reconciliación automática)**: nuevo `POST /api/v1/finance/bank-reconciliation` — recibe las filas de un extracto bancario (CSV subido y parseado en el cliente, columnas `fecha, monto, referencia, descripcion`) e intenta hacer match automático buscando una factura cuyo `invoice_number` sea igual a la `referencia` de la transferencia (lo que el padre normalmente escribe al transferir). Si coincide número Y monto, concilia solo: crea el `payments` y marca la factura `paid`. Si el número coincide pero el monto no, o si ninguna factura coincide, lo deja en listas separadas ("monto no coincide" / "sin factura coincidente") para revisión manual **en vez de adivinar** — mismo criterio de no inventar reglas de negocio que el resto de la sesión. Nueva pestaña "Conciliación Bancaria" en el Portal de Finanzas con las 3 listas de resultado.
+  - Verificado: FKs de `teacher_evaluations` (2 relaciones a `profiles`: `teacher_id`, `evaluator_profile_id`) desambiguadas explícitamente; insert/delete de prueba de `facilities` contra producción; typecheck limpio; Portal ERP y Portal de Finanzas sirven HTTP 200 en local tras los cambios.
 
 ## 4. Tarea en curso
 
-Ninguna en este momento. El usuario pidió continuar "todo poco a poco, uno detrás de otro" con los ítems "Core" del roadmap grande (§5.1); CRM de Admisiones, Becas/Descuentos, Control de Morosidad y Vacaciones/Suplencias (ver arriba) son los primeros cuatro. Backlog técnico interno (§5.2) ya resuelto en lo que no estaba bloqueado.
+Ninguna en este momento. Con esto quedan completos TODOS los ítems "Core" y los de RRHH/Finanzas "Avanzado" del roadmap grande (§5.1). Quedan pendientes (no iniciados): Académico avanzado (LMS, rúbricas, analítica predictiva), Admisiones avanzado (examen en línea, firma electrónica), Padres avanzado (billetera/POS cafetería, WhatsApp, geolocalización de buses), y Arquitectura (PWA, API pública, auditoría ampliada). Backlog técnico interno (§5.2) ya resuelto en lo que no estaba bloqueado.
 
 Tarea completada justo antes: personal expatriado/honorarios profesionales + primera versión (sin desglose) del acumulado mensual de nómina.
 
@@ -185,16 +194,16 @@ El usuario está pegando, sección por sección, una lista de posibles mejoras p
   - ~~Gestión de Becas, Descuentos y Convenios~~ **RESUELTO** — ver sección 3/4.
   - Notas de Crédito y Anulaciones: flujo contable legal para cancelar facturas emitidas por error.
 - Avanzado (diferenciadores):
-  - Integración Bancaria (reconciliación automática): subir extracto bancario CSV/Excel y hacer match automático depósito↔factura por número de referencia.
-  - Control de Presupuesto Anual por departamento: al crear una Orden de Compra, avisar si el departamento ya agotó su presupuesto asignado. *Nota: ya existe el catálogo de `departments`; faltaría el presupuesto anual y la validación al crear `purchase_orders`.*
+  - ~~Integración Bancaria (reconciliación automática)~~ **RESUELTO** — ver sección 3/4.
+  - ~~Control de Presupuesto Anual por departamento~~ **RESUELTO** — ver sección 3/4.
 
 **Recursos Humanos e Infraestructura**
 - Core:
   - ~~Control de Vacaciones e Incapacidades (Ausencias)~~ **RESUELTO** — ver sección 3/4.
   - ~~Asignación de Suplencias~~ **RESUELTO** — ver sección 3/4.
 - Avanzado (diferenciadores):
-  - Reserva de Espacios (Facility Booking): calendario para reservar auditorio/laboratorio/proyector/sala de cómputo y evitar conflictos.
-  - Evaluación Docente 360°: alumnos + coordinación evalúan al profesor anualmente, genera puntaje de desempeño para RRHH.
+  - ~~Reserva de Espacios (Facility Booking)~~ **RESUELTO** — ver sección 3/4.
+  - ~~Evaluación Docente 360°~~ **RESUELTO (parcial — ver nota de alcance en sección 3/4: falta encuesta de alumnos porque no hay login de alumno todavía)** — ver sección 3/4.
 
 **Arquitectura y Escalabilidad (Técnico)**
 - App Móvil Nativa o PWA instalable (iOS/Android) para Portal de Padres y Docentes, con notificaciones push (Firebase o Supabase).

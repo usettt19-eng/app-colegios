@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Package, Monitor, Briefcase, TrendingDown, Plus, CheckCircle, Laptop, PenTool, HardDrive, Wallet, Users, Calculator, Loader2, Truck, ShoppingCart, CalendarOff, UserCog, X } from 'lucide-react';
+import { Package, Monitor, Briefcase, TrendingDown, Plus, CheckCircle, Laptop, PenTool, HardDrive, Wallet, Users, Calculator, Loader2, Truck, ShoppingCart, CalendarOff, UserCog, X, DoorOpen, Star } from 'lucide-react';
 
 // Contexto de demostración: en producción tenant_id / requested_by vienen del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -69,6 +69,42 @@ interface ClassOption {
   name: string;
   teacher_id: string | null;
   courses?: { name: string };
+}
+
+interface Facility {
+  id: string;
+  name: string;
+  category: string | null;
+  capacity: number | null;
+  is_active: boolean;
+}
+
+interface FacilityBooking {
+  id: string;
+  facility_id: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  purpose: string | null;
+  facilities?: { name: string; category: string | null };
+  profiles?: { first_name: string; last_name: string };
+}
+
+interface EvaluationCycle {
+  id: string;
+  name: string;
+  is_open: boolean;
+  academic_terms?: { name: string };
+}
+
+interface TeacherEvaluationSummaryRow {
+  teacher_id: string;
+  teacher_name: string;
+  student_average: number | null;
+  student_responses: number;
+  coordination_average: number | null;
+  coordination_responses: number;
+  overall_average: number | null;
 }
 
 interface StaffOption {
@@ -142,7 +178,7 @@ interface PurchaseOrder {
 }
 
 export const CorporatePortal: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'assets' | 'consumables' | 'payroll' | 'procurement' | 'hr_leave'>('assets');
+  const [activeTab, setActiveTab] = useState<'assets' | 'consumables' | 'payroll' | 'procurement' | 'hr_leave' | 'facilities' | 'evaluations'>('assets');
   const [message, setMessage] = useState('');
 
   // --- Patrimonio IT ---
@@ -193,6 +229,231 @@ export const CorporatePortal: React.FC = () => {
   const [leaveForm, setLeaveForm] = useState({ employee_id: '', leave_type: 'vacation', start_date: '', end_date: '', days_requested: '', reason: '' });
   const [substituteForm, setSubstituteForm] = useState({ class_id: '', date: '', substitute_teacher_id: '', notes: '' });
   const [vacationBalanceDrafts, setVacationBalanceDrafts] = useState<Record<string, string>>({});
+
+  // --- Reserva de Espacios (Facility Booking) ---
+  const [facilities, setFacilities] = useState<Facility[]>([]);
+  const [facilityBookings, setFacilityBookings] = useState<FacilityBooking[]>([]);
+  const [facilitiesLoading, setFacilitiesLoading] = useState(false);
+  const [facilityForm, setFacilityForm] = useState({ name: '', category: '', capacity: '' });
+  const [bookingForm, setBookingForm] = useState({ facility_id: '', date: '', start_time: '', end_time: '', purpose: '' });
+
+  // --- Evaluación Docente 360° ---
+  const [evaluationCycles, setEvaluationCycles] = useState<EvaluationCycle[]>([]);
+  const [evaluationSummary, setEvaluationSummary] = useState<TeacherEvaluationSummaryRow[]>([]);
+  const [selectedCycleId, setSelectedCycleId] = useState<string>('');
+  const [evaluationsLoading, setEvaluationsLoading] = useState(false);
+  const [cycleForm, setCycleForm] = useState({ name: '' });
+  const [evalForm, setEvalForm] = useState({ teacher_id: '', score_teaching: '5', score_punctuality: '5', score_communication: '5', score_fairness: '5', comments: '' });
+
+  const loadFacilitiesData = async () => {
+    setFacilitiesLoading(true);
+    try {
+      const [facRes, bookRes] = await Promise.all([
+        fetch(`/api/v1/facilities?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/facilities/bookings?tenant_id=${DEMO_TENANT_ID}`),
+      ]);
+      const facData = await facRes.json();
+      const bookData = await bookRes.json();
+      setFacilities(facData.facilities || []);
+      setFacilityBookings(bookData.bookings || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+    setFacilitiesLoading(false);
+  };
+
+  const handleCreateFacility = async () => {
+    if (!facilityForm.name) {
+      setMessage('❌ Escribe el nombre del espacio.');
+      return;
+    }
+    setFacilitiesLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/facilities', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, ...facilityForm, capacity: facilityForm.capacity ? Number(facilityForm.capacity) : null }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Espacio creado.');
+        setFacilityForm({ name: '', category: '', capacity: '' });
+        loadFacilitiesData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo crear el espacio.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setFacilitiesLoading(false);
+  };
+
+  const handleCreateBooking = async () => {
+    if (!bookingForm.facility_id || !bookingForm.date || !bookingForm.start_time || !bookingForm.end_time) {
+      setMessage('❌ Completa el espacio, la fecha y el horario.');
+      return;
+    }
+    setFacilitiesLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/facilities/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, booked_by: DEMO_REQUESTER_ID, ...bookingForm }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Espacio reservado.');
+        setBookingForm({ facility_id: '', date: '', start_time: '', end_time: '', purpose: '' });
+        loadFacilitiesData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo reservar el espacio.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setFacilitiesLoading(false);
+  };
+
+  const handleCancelBooking = async (id: string) => {
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/facilities/bookings/${id}`, { method: 'DELETE' });
+      const data = await response.json();
+      if (data.success) {
+        setFacilityBookings(prev => prev.filter(b => b.id !== id));
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo cancelar la reserva.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
+  const loadEvaluationsData = async () => {
+    setEvaluationsLoading(true);
+    try {
+      const [cyclesRes, staffRes] = await Promise.all([
+        fetch(`/api/v1/teacher-evaluations/cycles?tenant_id=${DEMO_TENANT_ID}`),
+        fetch(`/api/v1/hierarchy/staff?tenant_id=${DEMO_TENANT_ID}`),
+      ]);
+      const cyclesData = await cyclesRes.json();
+      const staffData = await staffRes.json();
+      setStaffOptions(staffData.staff || []);
+      const cycles: EvaluationCycle[] = cyclesData.cycles || [];
+      setEvaluationCycles(cycles);
+      const activeCycleId = selectedCycleId || cycles[0]?.id || '';
+      setSelectedCycleId(activeCycleId);
+      if (activeCycleId) {
+        const summaryRes = await fetch(`/api/v1/teacher-evaluations/summary?tenant_id=${DEMO_TENANT_ID}&cycle_id=${activeCycleId}`);
+        const summaryData = await summaryRes.json();
+        setEvaluationSummary(summaryData.summary || []);
+      } else {
+        setEvaluationSummary([]);
+      }
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+    setEvaluationsLoading(false);
+  };
+
+  const loadEvaluationSummaryForCycle = async (cycleId: string) => {
+    setSelectedCycleId(cycleId);
+    if (!cycleId) { setEvaluationSummary([]); return; }
+    try {
+      const response = await fetch(`/api/v1/teacher-evaluations/summary?tenant_id=${DEMO_TENANT_ID}&cycle_id=${cycleId}`);
+      const data = await response.json();
+      setEvaluationSummary(data.summary || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+  };
+
+  const handleCreateCycle = async () => {
+    if (!cycleForm.name) {
+      setMessage('❌ Escribe el nombre del ciclo de evaluación.');
+      return;
+    }
+    setEvaluationsLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/teacher-evaluations/cycles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, name: cycleForm.name }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Ciclo de evaluación creado.');
+        setCycleForm({ name: '' });
+        loadEvaluationsData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo crear el ciclo.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setEvaluationsLoading(false);
+  };
+
+  const handleCloseCycle = async (cycleId: string) => {
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/teacher-evaluations/cycles/${cycleId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_open: false }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Ciclo cerrado.');
+        loadEvaluationsData();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo cerrar el ciclo.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
+  const handleSubmitCoordinationEvaluation = async () => {
+    if (!selectedCycleId || !evalForm.teacher_id) {
+      setMessage('❌ Selecciona el ciclo y el docente a evaluar.');
+      return;
+    }
+    setEvaluationsLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/teacher-evaluations/evaluations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          cycle_id: selectedCycleId,
+          teacher_id: evalForm.teacher_id,
+          evaluator_role: 'coordination',
+          evaluator_profile_id: DEMO_REQUESTER_ID,
+          score_teaching: Number(evalForm.score_teaching),
+          score_punctuality: Number(evalForm.score_punctuality),
+          score_communication: Number(evalForm.score_communication),
+          score_fairness: Number(evalForm.score_fairness),
+          comments: evalForm.comments || null,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Evaluación registrada.');
+        setEvalForm({ teacher_id: '', score_teaching: '5', score_punctuality: '5', score_communication: '5', score_fairness: '5', comments: '' });
+        loadEvaluationSummaryForCycle(selectedCycleId);
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo registrar la evaluación.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setEvaluationsLoading(false);
+  };
 
   const loadHrLeaveData = async () => {
     setHrLeaveLoading(true);
@@ -364,6 +625,8 @@ export const CorporatePortal: React.FC = () => {
     if (activeTab === 'assets') loadAssets();
     if (activeTab === 'consumables') loadConsumables();
     if (activeTab === 'hr_leave') loadHrLeaveData();
+    if (activeTab === 'facilities') loadFacilitiesData();
+    if (activeTab === 'evaluations') loadEvaluationsData();
   }, [activeTab]);
 
   const loadAssets = async () => {
@@ -779,6 +1042,18 @@ export const CorporatePortal: React.FC = () => {
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'hr_leave' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
           <CalendarOff className="w-4 h-4 mr-2" /> Ausencias y Suplencias
+        </button>
+        <button
+          onClick={() => setActiveTab('facilities')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'facilities' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <DoorOpen className="w-4 h-4 mr-2" /> Reserva de Espacios
+        </button>
+        <button
+          onClick={() => setActiveTab('evaluations')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'evaluations' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <Star className="w-4 h-4 mr-2" /> Evaluación Docente 360°
         </button>
       </div>
 
@@ -1729,6 +2004,262 @@ export const CorporatePortal: React.FC = () => {
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Reserva de Espacios (Facility Booking) */}
+      {activeTab === 'facilities' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
+              <h2 className="font-bold text-slate-700 flex items-center"><DoorOpen className="w-4 h-4 mr-2 text-blue-600" /> Registrar Espacio</h2>
+              <input
+                type="text" placeholder="Nombre (ej. Auditorio, Laboratorio de Ciencias)" value={facilityForm.name}
+                onChange={e => setFacilityForm({ ...facilityForm, name: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  type="text" placeholder="Categoría (opcional)" value={facilityForm.category}
+                  onChange={e => setFacilityForm({ ...facilityForm, category: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <input
+                  type="number" placeholder="Capacidad (opcional)" value={facilityForm.capacity}
+                  onChange={e => setFacilityForm({ ...facilityForm, capacity: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <button
+                onClick={handleCreateFacility}
+                disabled={facilitiesLoading}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm"
+              >
+                {facilitiesLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                Registrar Espacio
+              </button>
+
+              {facilities.length > 0 && (
+                <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                  {facilities.map(f => (
+                    <div key={f.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-md px-3 py-1.5">
+                      <span className="text-slate-600">{f.name} {f.category ? `(${f.category})` : ''} {f.capacity ? `· cap. ${f.capacity}` : ''}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
+              <h2 className="font-bold text-slate-700 flex items-center"><CalendarOff className="w-4 h-4 mr-2 text-blue-600" /> Reservar Espacio</h2>
+              <select
+                value={bookingForm.facility_id}
+                onChange={e => setBookingForm({ ...bookingForm, facility_id: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Selecciona el espacio...</option>
+                {facilities.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+              <input
+                type="date" value={bookingForm.date}
+                onChange={e => setBookingForm({ ...bookingForm, date: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  type="time" value={bookingForm.start_time}
+                  onChange={e => setBookingForm({ ...bookingForm, start_time: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <input
+                  type="time" value={bookingForm.end_time}
+                  onChange={e => setBookingForm({ ...bookingForm, end_time: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <input
+                type="text" placeholder="Motivo (opcional)" value={bookingForm.purpose}
+                onChange={e => setBookingForm({ ...bookingForm, purpose: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={handleCreateBooking}
+                disabled={facilitiesLoading}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm"
+              >
+                {facilitiesLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                Reservar
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 bg-slate-50 border-b border-slate-100">
+              <h2 className="font-bold text-slate-700">Reservas</h2>
+            </div>
+            {facilitiesLoading ? (
+              <div className="flex items-center justify-center py-12 text-slate-400">
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Cargando...
+              </div>
+            ) : facilityBookings.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay reservas.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {facilityBookings.map(b => (
+                  <div key={b.id} className="p-4 flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <p className="font-semibold text-slate-700 text-sm">{b.facilities?.name} · {b.date} · {b.start_time}–{b.end_time}</p>
+                      <p className="text-xs text-slate-400">
+                        {b.profiles ? `${b.profiles.first_name} ${b.profiles.last_name}` : 'Staff'}{b.purpose ? ` · ${b.purpose}` : ''}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleCancelBooking(b.id)}
+                      className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 p-1 rounded"
+                      title="Cancelar"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Evaluación Docente 360° */}
+      {activeTab === 'evaluations' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
+            <h2 className="font-bold text-slate-700 flex items-center"><Star className="w-4 h-4 mr-2 text-blue-600" /> Ciclos de Evaluación</h2>
+            <div className="flex items-center gap-3 flex-wrap">
+              <input
+                type="text" placeholder="Nombre del ciclo (ej. Evaluación Anual 2026)" value={cycleForm.name}
+                onChange={e => setCycleForm({ name: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1 min-w-[200px]"
+              />
+              <button
+                onClick={handleCreateCycle}
+                disabled={evaluationsLoading}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm"
+              >
+                {evaluationsLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                Crear Ciclo
+              </button>
+            </div>
+            {evaluationCycles.length > 0 && (
+              <div className="flex items-center gap-3 flex-wrap pt-2 border-t border-slate-100">
+                <select
+                  value={selectedCycleId}
+                  onChange={e => loadEvaluationSummaryForCycle(e.target.value)}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {evaluationCycles.map(c => <option key={c.id} value={c.id}>{c.name} {c.is_open ? '(abierto)' : '(cerrado)'}</option>)}
+                </select>
+                {evaluationCycles.find(c => c.id === selectedCycleId)?.is_open && (
+                  <button
+                    onClick={() => handleCloseCycle(selectedCycleId)}
+                    className="text-xs font-bold text-rose-600 hover:text-rose-800"
+                  >
+                    Cerrar este ciclo
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {selectedCycleId && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
+              <h2 className="font-bold text-slate-700 flex items-center"><UserCog className="w-4 h-4 mr-2 text-blue-600" /> Evaluación de Coordinación</h2>
+              <p className="text-xs text-slate-500">Escala 1 (muy deficiente) a 5 (excelente) por dimensión.</p>
+              <select
+                value={evalForm.teacher_id}
+                onChange={e => setEvalForm({ ...evalForm, teacher_id: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Selecciona el docente...</option>
+                {staffOptions.filter(s => s.role === 'teacher').map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>)}
+              </select>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <label className="text-xs text-slate-500">
+                  Enseñanza
+                  <input
+                    type="number" min={1} max={5} value={evalForm.score_teaching}
+                    onChange={e => setEvalForm({ ...evalForm, score_teaching: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-2 py-1.5 text-sm mt-0.5"
+                  />
+                </label>
+                <label className="text-xs text-slate-500">
+                  Puntualidad
+                  <input
+                    type="number" min={1} max={5} value={evalForm.score_punctuality}
+                    onChange={e => setEvalForm({ ...evalForm, score_punctuality: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-2 py-1.5 text-sm mt-0.5"
+                  />
+                </label>
+                <label className="text-xs text-slate-500">
+                  Comunicación
+                  <input
+                    type="number" min={1} max={5} value={evalForm.score_communication}
+                    onChange={e => setEvalForm({ ...evalForm, score_communication: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-2 py-1.5 text-sm mt-0.5"
+                  />
+                </label>
+                <label className="text-xs text-slate-500">
+                  Equidad
+                  <input
+                    type="number" min={1} max={5} value={evalForm.score_fairness}
+                    onChange={e => setEvalForm({ ...evalForm, score_fairness: e.target.value })}
+                    className="w-full border border-slate-300 rounded-md px-2 py-1.5 text-sm mt-0.5"
+                  />
+                </label>
+              </div>
+              <input
+                type="text" placeholder="Comentarios (opcional)" value={evalForm.comments}
+                onChange={e => setEvalForm({ ...evalForm, comments: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={handleSubmitCoordinationEvaluation}
+                disabled={evaluationsLoading}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-semibold text-sm"
+              >
+                {evaluationsLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                Registrar Evaluación
+              </button>
+            </div>
+          )}
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 bg-slate-50 border-b border-slate-100">
+              <h2 className="font-bold text-slate-700">Puntaje de Desempeño por Docente</h2>
+            </div>
+            {evaluationSummary.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Sin evaluaciones registradas todavía en este ciclo.</p>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">DOCENTE</th>
+                    <th className="px-4 py-3 font-semibold text-right">ALUMNOS (n)</th>
+                    <th className="px-4 py-3 font-semibold text-right">COORDINACIÓN (n)</th>
+                    <th className="px-4 py-3 font-semibold text-right">PUNTAJE GENERAL</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {evaluationSummary.map(row => (
+                    <tr key={row.teacher_id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-semibold text-slate-700">{row.teacher_name}</td>
+                      <td className="px-4 py-3 text-right text-slate-500">{row.student_average !== null ? `${row.student_average} (${row.student_responses})` : `— (0)`}</td>
+                      <td className="px-4 py-3 text-right text-slate-500">{row.coordination_average !== null ? `${row.coordination_average} (${row.coordination_responses})` : `— (0)`}</td>
+                      <td className="px-4 py-3 text-right font-bold text-blue-600">{row.overall_average ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         </div>
