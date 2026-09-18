@@ -24,6 +24,12 @@ interface ParentSuggestion {
   role: string;
 }
 
+interface GradeLevel {
+  id: string;
+  name: string;
+  sort_order: number;
+}
+
 interface Props {
   tenantId: string;
 }
@@ -36,10 +42,12 @@ const RELATIONSHIPS = [
 
 export const StudentDirectory: React.FC<Props> = ({ tenantId }) => {
   const [students, setStudents] = useState<Student[]>([]);
+  const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [message, setMessage] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   const [parentSearch, setParentSearch] = useState('');
   const [parentSuggestions, setParentSuggestions] = useState<ParentSuggestion[]>([]);
@@ -67,6 +75,38 @@ export const StudentDirectory: React.FC<Props> = ({ tenantId }) => {
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
+
+  useEffect(() => {
+    fetch(`/api/v1/grade-settings/levels?tenant_id=${tenantId}`)
+      .then(r => r.json())
+      .then(d => setGradeLevels(d.gradeLevels || []))
+      .catch(() => {});
+  }, [tenantId]);
+
+  const gradeSortOrder = (gradeName: string | null) => {
+    if (!gradeName) return 9999;
+    const level = gradeLevels.find(g => g.name.trim().toLowerCase() === gradeName.trim().toLowerCase());
+    return level ? level.sort_order : 9998;
+  };
+
+  const groups = React.useMemo(() => {
+    const map = new Map<string, { grade: string; section: string; students: Student[] }>();
+    for (const student of students) {
+      const grade = student.grade || 'Sin grado';
+      const section = student.section || 'Sin sección';
+      const key = `${grade}||${section}`;
+      if (!map.has(key)) map.set(key, { grade, section, students: [] });
+      map.get(key)!.students.push(student);
+    }
+    return Array.from(map.values()).sort((a, b) => {
+      const orderDiff = gradeSortOrder(a.grade) - gradeSortOrder(b.grade);
+      if (orderDiff !== 0) return orderDiff;
+      return a.section.localeCompare(b.section);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [students, gradeLevels]);
+
+  const toggleGroup = (key: string) => setCollapsedGroups({ ...collapsedGroups, [key]: !collapsedGroups[key] });
 
   useEffect(() => {
     if (!parentSearch) {
@@ -202,15 +242,32 @@ export const StudentDirectory: React.FC<Props> = ({ tenantId }) => {
           <div className="flex items-center justify-center py-12 text-slate-400">
             <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Cargando alumnos...
           </div>
-        ) : students.length === 0 ? (
+        ) : groups.length === 0 ? (
           <p className="p-6 text-sm text-slate-400">No hay alumnos matriculados{search ? ' que coincidan con la búsqueda' : ' todavía'}.</p>
         ) : (
-          <div className="divide-y divide-slate-100">
-            {students.map(student => {
-              const isExpanded = expandedId === student.id;
-              const guardians = (student.parent_students || []).filter(g => g.profiles);
+          <div className="divide-y divide-slate-200">
+            {groups.map(group => {
+              const groupKey = `${group.grade}||${group.section}`;
+              const isCollapsed = !!collapsedGroups[groupKey];
               return (
-                <div key={student.id}>
+                <div key={groupKey}>
+                  <button
+                    onClick={() => toggleGroup(groupKey)}
+                    className="w-full text-left px-4 py-2.5 flex items-center justify-between bg-slate-100 hover:bg-slate-200"
+                  >
+                    <span className="text-sm font-bold text-slate-600">
+                      {group.grade} {group.section !== 'Sin sección' && `- ${group.section}`}
+                      <span className="ml-2 font-normal text-slate-400">({group.students.length})</span>
+                    </span>
+                    {isCollapsed ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronUp className="w-4 h-4 text-slate-400" />}
+                  </button>
+                  {!isCollapsed && (
+                    <div className="divide-y divide-slate-100">
+                      {group.students.map(student => {
+                        const isExpanded = expandedId === student.id;
+                        const guardians = (student.parent_students || []).filter(g => g.profiles);
+                        return (
+                          <div key={student.id}>
                   <button
                     onClick={() => toggleExpanded(student.id)}
                     className="w-full text-left p-4 flex items-center justify-between hover:bg-slate-50"
@@ -343,6 +400,11 @@ export const StudentDirectory: React.FC<Props> = ({ tenantId }) => {
                           </div>
                         )}
                       </div>
+                    </div>
+                  )}
+                </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
