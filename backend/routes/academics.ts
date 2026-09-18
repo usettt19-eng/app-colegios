@@ -95,14 +95,14 @@ router.get("/courses", async (req: Request, res: Response) => {
 // masivamente después con POST /courses/:id/generate-groups.
 router.post("/courses", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, code, name, area, description, credits, grade_level_ids } = req.body;
+    const { tenant_id, code, name, area, description, weekly_hours, grade_level_ids } = req.body;
     if (!tenant_id || !code || !name) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, code, name)" });
     }
 
     const { data: course, error } = await supabaseAdmin
       .from("courses")
-      .insert({ tenant_id, code, name, area: area || null, description, credits })
+      .insert({ tenant_id, code, name, area: area || null, description, weekly_hours })
       .select()
       .single();
 
@@ -239,7 +239,7 @@ router.get("/classes", async (req: Request, res: Response) => {
 
     let query = supabaseAdmin
       .from("classes")
-      .select("*, courses(name, code), profiles(first_name, last_name), academic_terms(name), grade_sections(name, grade_levels(name))")
+      .select("*, courses(name, code, weekly_hours), profiles(first_name, last_name), academic_terms(name), grade_sections(name, grade_levels(name))")
       .eq("tenant_id", tenant_id);
 
     if (term_id) query = query.eq("term_id", term_id);
@@ -385,17 +385,32 @@ router.patch("/classes/:id", async (req: Request, res: Response) => {
 // ==========================================
 
 // GET /api/v1/academics/schedules?class_id=...
+// GET /api/v1/academics/schedules?tenant_id=...&teacher_id=... (distributivo: todos los bloques de un docente)
 router.get("/schedules", async (req: Request, res: Response) => {
   try {
-    const { class_id } = req.query;
-    if (!class_id) return res.status(400).json({ error: "Falta class_id" });
+    const { class_id, tenant_id, teacher_id } = req.query;
 
-    const { data, error } = await supabaseAdmin
+    if (class_id) {
+      const { data, error } = await supabaseAdmin
+        .from("class_schedules")
+        .select("*")
+        .eq("class_id", class_id)
+        .order("day_of_week");
+
+      if (error) return res.status(500).json({ error: "Error al consultar el horario." });
+      return res.status(200).json({ success: true, schedules: data });
+    }
+
+    if (!tenant_id) return res.status(400).json({ error: "Falta class_id o tenant_id" });
+
+    let query = supabaseAdmin
       .from("class_schedules")
-      .select("*")
-      .eq("class_id", class_id)
-      .order("day_of_week");
+      .select("*, classes!inner(id, name, teacher_id, course_id, courses(name, weekly_hours), grade_sections(name, grade_levels(name)))")
+      .eq("tenant_id", tenant_id);
 
+    if (teacher_id) query = query.eq("classes.teacher_id", teacher_id);
+
+    const { data, error } = await query.order("day_of_week");
     if (error) return res.status(500).json({ error: "Error al consultar el horario." });
     return res.status(200).json({ success: true, schedules: data });
   } catch (error: any) {
@@ -405,11 +420,37 @@ router.get("/schedules", async (req: Request, res: Response) => {
 });
 
 // POST /api/v1/academics/schedules
+// Valida que el docente de la clase no tenga ya otro bloque cruzado el mismo día/hora
+// (un docente puede tener varias classes: distintos cursos, grados y secciones).
 router.post("/schedules", async (req: Request, res: Response) => {
   try {
     const { tenant_id, class_id, day_of_week, start_time, end_time, room_number } = req.body;
     if (!tenant_id || !class_id || day_of_week === undefined || !start_time || !end_time) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, class_id, day_of_week, start_time, end_time)" });
+    }
+    if (start_time >= end_time) {
+      return res.status(400).json({ error: "La hora de inicio debe ser antes de la hora de fin." });
+    }
+
+    const { data: classGroup } = await supabaseAdmin
+      .from("classes")
+      .select("teacher_id")
+      .eq("id", class_id)
+      .single();
+
+    if (classGroup?.teacher_id) {
+      const { data: teacherBlocks } = await supabaseAdmin
+        .from("class_schedules")
+        .select("start_time, end_time, classes!inner(teacher_id)")
+        .eq("day_of_week", day_of_week)
+        .eq("classes.teacher_id", classGroup.teacher_id);
+
+      const hasConflict = (teacherBlocks || []).some(
+        (b: any) => start_time < b.end_time && end_time > b.start_time
+      );
+      if (hasConflict) {
+        return res.status(409).json({ error: "El docente ya tiene otro bloque de horario que se cruza ese día y hora." });
+      }
     }
 
     const { data: schedule, error } = await supabaseAdmin
@@ -429,6 +470,19 @@ router.post("/schedules", async (req: Request, res: Response) => {
     return res.status(201).json({ success: true, message: "Bloque de horario creado.", schedule });
   } catch (error: any) {
     console.error("Error en POST /api/v1/academics/schedules:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// DELETE /api/v1/academics/schedules/:id
+router.delete("/schedules/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabaseAdmin.from("class_schedules").delete().eq("id", id);
+    if (error) return res.status(500).json({ error: "Error al eliminar el bloque de horario." });
+    return res.status(200).json({ success: true, message: "Bloque de horario eliminado." });
+  } catch (error: any) {
+    console.error("Error en DELETE /api/v1/academics/schedules/:id:", error);
     return res.status(500).json({ error: "Error interno" });
   }
 });

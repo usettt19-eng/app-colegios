@@ -65,7 +65,7 @@ interface Course {
   code: string;
   name: string;
   area: string | null;
-  credits: number | null;
+  weekly_hours: number | null;
   course_grade_levels?: { grade_level_id: string; grade_levels: { id: string; name: string } | null }[];
 }
 
@@ -75,10 +75,27 @@ interface ClassGroup {
   capacity: number;
   teacher_id: string | null;
   grade_section_id: string | null;
-  courses?: { name: string; code: string };
+  courses?: { name: string; code: string; weekly_hours?: number | null };
   profiles?: { first_name: string; last_name: string } | null;
   academic_terms?: { name: string };
   grade_sections?: { name: string; grade_levels?: { name: string } } | null;
+}
+
+interface TeacherScheduleBlock {
+  id: string;
+  class_id: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  room_number: string | null;
+  classes?: {
+    id: string;
+    name: string;
+    teacher_id: string | null;
+    course_id: string;
+    courses?: { name: string; weekly_hours: number | null } | null;
+    grade_sections?: { name: string; grade_levels?: { name: string } | null } | null;
+  } | null;
 }
 
 interface GradeLevel {
@@ -111,7 +128,7 @@ export const AdminAdvancedPortal: React.FC = () => {
   const [classes, setClasses] = useState<ClassGroup[]>([]);
 
   const [termForm, setTermForm] = useState({ name: '', start_date: '', end_date: '', is_active: false });
-  const [courseForm, setCourseForm] = useState({ code: '', name: '', area: '', credits: '' });
+  const [courseForm, setCourseForm] = useState({ code: '', name: '', area: '', weekly_hours: '' });
   const [courseGradeLevelIds, setCourseGradeLevelIds] = useState<string[]>([]);
   const [generateGroupsForm, setGenerateGroupsForm] = useState<Record<string, { term_id: string; teacher_id: string }>>({});
   const [generatingGroupsCourseId, setGeneratingGroupsCourseId] = useState<string | null>(null);
@@ -119,6 +136,9 @@ export const AdminAdvancedPortal: React.FC = () => {
   const [classGradeLevelId, setClassGradeLevelId] = useState('');
   const [classTeacherReassign, setClassTeacherReassign] = useState<Record<string, string>>({});
   const [scheduleForm, setScheduleForm] = useState({ class_id: '', day_of_week: '1', start_time: '08:00', end_time: '09:00', room_number: '' });
+  const [distTeacherId, setDistTeacherId] = useState('');
+  const [teacherSchedules, setTeacherSchedules] = useState<TeacherScheduleBlock[]>([]);
+  const [teacherSchedulesLoading, setTeacherSchedulesLoading] = useState(false);
 
   // --- Alumnos y Padres (subvista) ---
   const [studentsSubView, setStudentsSubView] = useState<'students' | 'parents'>('students');
@@ -585,14 +605,14 @@ export const AdminAdvancedPortal: React.FC = () => {
           code: courseForm.code,
           name: courseForm.name,
           area: courseForm.area || null,
-          credits: courseForm.credits ? Number(courseForm.credits) : null,
+          weekly_hours: courseForm.weekly_hours ? Number(courseForm.weekly_hours) : null,
           grade_level_ids: courseGradeLevelIds,
         }),
       });
       const data = await response.json();
       if (data.success) {
         setMessage('✅ Curso agregado al catálogo académico.');
-        setCourseForm({ code: '', name: '', area: '', credits: '' });
+        setCourseForm({ code: '', name: '', area: '', weekly_hours: '' });
         setCourseGradeLevelIds([]);
         loadAll();
       } else {
@@ -688,6 +708,28 @@ export const AdminAdvancedPortal: React.FC = () => {
     }
   };
 
+  const blockHours = (start: string, end: string) => {
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    return Math.round(((eh * 60 + em - (sh * 60 + sm)) / 60) * 100) / 100;
+  };
+
+  const loadTeacherSchedules = async (teacherId: string) => {
+    if (!teacherId) {
+      setTeacherSchedules([]);
+      return;
+    }
+    setTeacherSchedulesLoading(true);
+    try {
+      const response = await fetch(`/api/v1/academics/schedules?tenant_id=${DEMO_TENANT_ID}&teacher_id=${teacherId}`);
+      const data = await response.json();
+      setTeacherSchedules(data.schedules || []);
+    } catch {
+      setTeacherSchedules([]);
+    }
+    setTeacherSchedulesLoading(false);
+  };
+
   const handleCreateSchedule = async () => {
     if (!scheduleForm.class_id) {
       setMessage('❌ Selecciona un grupo/clase para asignarle horario.');
@@ -711,6 +753,7 @@ export const AdminAdvancedPortal: React.FC = () => {
       const data = await response.json();
       if (data.success) {
         setMessage('✅ Bloque de horario asignado exitosamente.');
+        if (distTeacherId) loadTeacherSchedules(distTeacherId);
       } else {
         setMessage('❌ ' + (data.error || 'No se pudo crear el bloque de horario.'));
       }
@@ -718,6 +761,22 @@ export const AdminAdvancedPortal: React.FC = () => {
       setMessage('❌ Error de conexión.');
     }
     setLoading(false);
+  };
+
+  const handleDeleteSchedule = async (id: string) => {
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/academics/schedules/${id}`, { method: 'DELETE' });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Bloque de horario eliminado.');
+        if (distTeacherId) loadTeacherSchedules(distTeacherId);
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo eliminar el bloque.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
   };
 
   return (
@@ -900,8 +959,8 @@ export const AdminAdvancedPortal: React.FC = () => {
                 className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
               />
               <input
-                type="number" placeholder="Créditos" value={courseForm.credits}
-                onChange={e => setCourseForm({ ...courseForm, credits: e.target.value })}
+                type="number" step="0.5" placeholder="Horas semanales de clase" value={courseForm.weekly_hours}
+                onChange={e => setCourseForm({ ...courseForm, weekly_hours: e.target.value })}
                 className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
               />
               <div>
@@ -1112,6 +1171,72 @@ export const AdminAdvancedPortal: React.FC = () => {
 
       {/* Horarios */}
       {activeTab === 'schedules' && (
+        <div className="space-y-6">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+          <h2 className="font-bold text-slate-700 flex items-center"><Users2 className="w-4 h-4 mr-2 text-rose-600" /> Distributivo por Docente</h2>
+          <p className="text-sm text-slate-500">
+            Elige un docente para ver todos sus grupos (pueden ser distintos cursos, grados y secciones), las horas semanales requeridas por cada curso y las horas ya asignadas en el horario, para armar su distributivo sin cruces.
+          </p>
+          <select
+            value={distTeacherId}
+            onChange={e => { setDistTeacherId(e.target.value); loadTeacherSchedules(e.target.value); }}
+            className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+          >
+            <option value="">Selecciona un docente</option>
+            {staff.filter(s => s.role === 'teacher').map(t => <option key={t.id} value={t.id}>{t.first_name} {t.last_name}</option>)}
+          </select>
+
+          {distTeacherId && (
+            teacherSchedulesLoading ? (
+              <div className="flex items-center justify-center py-8 text-slate-400">
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Cargando distributivo...
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {classes.filter(c => c.teacher_id === distTeacherId).length === 0 ? (
+                  <p className="text-sm text-slate-400">Este docente aún no tiene grupos asignados.</p>
+                ) : (
+                  classes.filter(c => c.teacher_id === distTeacherId).map(c => {
+                    const blocks = teacherSchedules.filter(b => b.class_id === c.id);
+                    const scheduledHours = blocks.reduce((sum, b) => sum + blockHours(b.start_time, b.end_time), 0);
+                    const targetHours = c.courses?.weekly_hours ?? null;
+                    const short = targetHours !== null && scheduledHours < targetHours;
+                    return (
+                      <div key={c.id} className="border border-slate-200 rounded-lg p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                          <div>
+                            <span className="font-bold text-slate-700">{c.courses?.name}</span>
+                            <span className="text-xs text-slate-400 ml-2">
+                              {c.grade_sections ? `${c.grade_sections.grade_levels?.name} - ${c.grade_sections.name}` : c.name}
+                            </span>
+                          </div>
+                          <span className={`text-xs font-bold px-2 py-1 rounded-full ${short ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                            {scheduledHours}h asignadas {targetHours !== null ? `/ ${targetHours}h requeridas` : ''}
+                          </span>
+                        </div>
+                        {blocks.length === 0 ? (
+                          <p className="text-xs text-slate-400">Sin bloques de horario todavía.</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {blocks.map(b => (
+                              <span key={b.id} className="flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600">
+                                {DAYS[b.day_of_week]} {b.start_time.slice(0, 5)}-{b.end_time.slice(0, 5)}{b.room_number ? ` (${b.room_number})` : ''}
+                                <button onClick={() => handleDeleteSchedule(b.id)} className="hover:text-rose-600" title="Eliminar bloque">
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )
+          )}
+        </div>
+
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
           <h2 className="font-bold text-slate-700 flex items-center"><CalendarClock className="w-4 h-4 mr-2 text-rose-600" /> Asignar Bloque de Horario</h2>
           <select
@@ -1154,6 +1279,7 @@ export const AdminAdvancedPortal: React.FC = () => {
             {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
             Asignar Bloque de Horario
           </button>
+        </div>
         </div>
       )}
 

@@ -1,6 +1,7 @@
 # App Colegios — Estado del Proyecto
 
 > Documento vivo. Actualízalo cada vez que se cierre o se abra una tarea importante.
+> Regla operativa: cada vez que Claude avance en algo, actualiza este archivo en el mismo commit. Para retomar contexto del proyecto, leer este archivo primero — no releer toda la sesión.
 > Última actualización: 2026-09-18
 
 ## 1. Qué es esto
@@ -50,31 +51,11 @@ Cada tabla tiene `tenant_id` (modelo multi-tenant). El repo vive en GitHub, rama
 - **Admisiones ampliada**: captura cédula, fecha de nacimiento, colegio anterior, dirección del alumno; 3 responsables independientes (Madre/Padre/Acudiente), cada uno con búsqueda o creación de perfil.
 - **Multi-clase por docente**: un profesor puede tener varios `classes` (curso + grado-sección distintos) vía `classes.grade_section_id` + reasignación de docente por grupo en el Admin.
 - **Plan de estudios**: `course_grade_levels` (qué cursos aplican a qué grados) + **Matriz curricular** (tabla Área × Asignatura × Grados con toggle Sí/— tipo la de Bios Software) + botón "Generar Grupos" (crea automáticamente un `classes` por cada grado-sección mapeado al curso).
+- **Horas semanales + Distributivo por Docente**: `courses.credits` renombrado a `courses.weekly_hours` (horas de clase por semana). Nueva pestaña "Distributivo por Docente" dentro de Admin → Horarios: eliges un docente y ves todos sus `classes` (distintos cursos/grados/secciones), con horas requeridas (`weekly_hours` del curso) vs. horas ya asignadas (suma de bloques `class_schedules`), badge ámbar si faltan horas por asignar, y cada bloque se puede borrar (X). El backend valida en `POST /api/v1/academics/schedules` que el docente de la clase no tenga ya otro bloque cruzado ese día/hora (409 si hay conflicto) y expone `DELETE /api/v1/academics/schedules/:id`. `GET /api/v1/academics/schedules` ahora también acepta `tenant_id`+`teacher_id` (sin `class_id`) para traer todos los bloques de un docente de una vez.
 
-## 4. Tarea en curso (interrumpida, retomar aquí)
+## 4. Tarea en curso
 
-**Objetivo**: convertir `courses.credits` en "horas semanales" (`weekly_hours`) y usarlo en el módulo de **Horarios** para ayudar a distribuir las clases de los docentes que dan varios cursos en varios grados/secciones (aprovechando el trabajo de multi-clase por docente ya hecho).
-
-Decisión del usuario: opción 1 de 3 propuestas — renombrar `credits` y usarlo para el horario/distributivo — más la aclaración explícita: *"puede servir para distribuir las clases de los profesores que dan varios grados y varios cursos en varias secciones"*.
-
-Estado real del código en este momento: **nada implementado todavía**, solo investigación (se leyó `database_schemas/schedules_schema.md` y el handler `GET /schedules` en `backend/routes/academics.ts`).
-
-Modelo de datos relevante ya existente:
-- `class_schedules(id, tenant_id, class_id, day_of_week 0-6, start_time, end_time, room_number)`, único por `(class_id, day_of_week, start_time)`.
-- `classes.teacher_id`, `classes.grade_section_id` — permiten agrupar todas las clases de un mismo docente.
-- `courses.credits DECIMAL(3,1)` — hoy es un número guardado sin uso real; se va a renombrar/reutilizar como horas de clase por semana.
-
-### Plan a ejecutar (siguiente paso)
-
-1. **Migración**: renombrar `courses.credits` → `weekly_hours` (mismo tipo `DECIMAL(3,1)`) en el proyecto Supabase de producción, actualizar `database_schemas/academic_schema.md`.
-2. **Backend**: actualizar referencias a `credits` en:
-   - `backend/routes/academics.ts` (`GET`/`POST /courses`)
-   - `backend/routes/enrollments.ts` (embed `courses(name, credits)`)
-3. **Frontend**: actualizar referencias a `credits` en:
-   - `src/portals/AdminAdvancedPortal.tsx` (`Course` interface, `courseForm`, labels)
-   - `src/portals/ParentStudentPortal.tsx` (`ClassEnrollment.courses.credits`)
-4. **Vista de distribución de horario por docente** (nueva, en la pestaña "Horarios" del Admin): por cada docente, listar todas sus `classes` (distintos cursos/grados/secciones), mostrar horas requeridas (`weekly_hours` del curso) vs. horas ya asignadas (suma de bloques en `class_schedules`), y permitir crear/editar bloques de horario validando que no se crucen con otro bloque del mismo docente (conflicto de horario).
-5. Typecheck → Playwright screenshot → commit/push → instrucciones de redeploy al usuario.
+Ninguna en este momento — la última tarea (horas semanales / distributivo docente) quedó completa: migración aplicada, backend y frontend actualizados, typecheck limpio, verificado con Playwright, pendiente solo el commit/push + redeploy que se hace inmediatamente después de esta actualización.
 
 ## 5. Backlog conocido (no urgente, no iniciado)
 

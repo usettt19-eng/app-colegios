@@ -69,7 +69,7 @@ router.get("/:student_id", async (req: Request, res: Response) => {
         academic_terms (name, start_date, end_date),
         class_enrollments (
           final_grade,
-          classes (name, courses(name, credits))
+          classes (name, courses(name, weekly_hours))
         )
       `)
       .eq("student_id", student_id)
