@@ -77,7 +77,7 @@ router.get("/courses", async (req: Request, res: Response) => {
 
     const { data, error } = await supabaseAdmin
       .from("courses")
-      .select("*")
+      .select("*, course_grade_levels(grade_level_id, grade_levels(id, name))")
       .eq("tenant_id", tenant_id)
       .order("name");
 
@@ -90,9 +90,12 @@ router.get("/courses", async (req: Request, res: Response) => {
 });
 
 // POST /api/v1/academics/courses
+// Además de crear el curso en el catálogo, permite indicar de una vez a
+// qué grados aplica (grade_level_ids), para poder generar sus grupos
+// masivamente después con POST /courses/:id/generate-groups.
 router.post("/courses", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, code, name, description, credits } = req.body;
+    const { tenant_id, code, name, description, credits, grade_level_ids } = req.body;
     if (!tenant_id || !code || !name) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, code, name)" });
     }
@@ -111,9 +114,75 @@ router.post("/courses", async (req: Request, res: Response) => {
       return res.status(500).json({ error: "Error al crear el curso." });
     }
 
+    if (Array.isArray(grade_level_ids) && grade_level_ids.length > 0) {
+      await supabaseAdmin.from("course_grade_levels").insert(
+        grade_level_ids.map((grade_level_id: string) => ({ tenant_id, course_id: course.id, grade_level_id }))
+      );
+    }
+
     return res.status(201).json({ success: true, message: "Curso creado en el catálogo.", course });
   } catch (error: any) {
     console.error("Error en POST /api/v1/academics/courses:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/academics/courses/:id/generate-groups
+// Genera automáticamente un grupo (classes) por cada sección de los
+// grados asignados a este curso, para el término indicado — en vez de
+// crear cada grupo a mano, uno por sección.
+router.post("/courses/:id/generate-groups", async (req: Request, res: Response) => {
+  try {
+    const { id: course_id } = req.params;
+    const { tenant_id, term_id, teacher_id } = req.body;
+    if (!tenant_id || !term_id) return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, term_id)" });
+
+    const { data: course } = await supabaseAdmin.from("courses").select("name").eq("id", course_id).single();
+    if (!course) return res.status(404).json({ error: "Curso no encontrado." });
+
+    const { data: mappings, error: mappingsError } = await supabaseAdmin
+      .from("course_grade_levels")
+      .select("grade_level_id, grade_levels(name, grade_sections(id, name))")
+      .eq("course_id", course_id);
+
+    if (mappingsError) return res.status(500).json({ error: "Error al consultar el plan de estudios del curso." });
+    if (!mappings || mappings.length === 0) {
+      return res.status(400).json({ error: "Este curso no tiene grados asignados. Edítalo para asignarle al menos uno." });
+    }
+
+    let created = 0;
+    const skipped: string[] = [];
+
+    for (const mapping of mappings) {
+      const gradeLevel: any = mapping.grade_levels;
+      const sections: any[] = gradeLevel?.grade_sections || [];
+      for (const section of sections) {
+        const { error: insertError } = await supabaseAdmin.from("classes").insert({
+          tenant_id,
+          term_id,
+          course_id,
+          teacher_id: teacher_id || null,
+          grade_section_id: section.id,
+          name: `${gradeLevel.name} - ${section.name}`,
+        });
+
+        if (insertError) {
+          // El índice único (term_id, course_id, grade_section_id) rechaza duplicados
+          skipped.push(`${gradeLevel.name} - ${section.name}`);
+          continue;
+        }
+        created++;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `${created} grupo(s) creado(s) para "${course.name}".`,
+      created,
+      skipped,
+    });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/academics/courses/:id/generate-groups:", error);
     return res.status(500).json({ error: "Error interno" });
   }
 });
