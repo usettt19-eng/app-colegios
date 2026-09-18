@@ -2,7 +2,7 @@
 
 > Documento vivo. Actualízalo cada vez que se cierre o se abra una tarea importante.
 > Regla operativa: cada vez que Claude avance en algo, actualiza este archivo en el mismo commit. Para retomar contexto del proyecto, leer este archivo primero — no releer toda la sesión.
-> Última actualización: 2026-09-18 (Académico avanzado: rúbricas + Alerta Temprana)
+> Última actualización: 2026-09-18 (RBAC: Role-Based Access Control por sección de portal)
 
 ## 1. Qué es esto
 
