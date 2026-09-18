@@ -45,7 +45,7 @@ router.get("/", async (req: Request, res: Response) => {
 // Supabase Auth y su fila en profiles, igual que POST /api/v1/tenants/:id/admins.
 router.post("/", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, email, password, first_name, last_name, role, phone } = req.body;
+    const { tenant_id, email, password, first_name, last_name, role, phone, cedula } = req.body;
 
     if (!tenant_id || !email || !password || !first_name || !last_name || !role) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, email, password, first_name, last_name, role)" });
@@ -65,7 +65,7 @@ router.post("/", async (req: Request, res: Response) => {
 
     const { data: profile, error: profileError } = await supabaseAdmin
       .from("profiles")
-      .insert({ id: created.user.id, tenant_id, first_name, last_name, email, role, phone: phone || null })
+      .insert({ id: created.user.id, tenant_id, first_name, last_name, email, role, phone: phone || null, cedula: cedula || null })
       .select()
       .single();
 

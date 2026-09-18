@@ -46,7 +46,10 @@ export const AdmissionsPortal: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
-  const [studentForm, setStudentForm] = useState({ first_name: '', last_name: '', grade_section_id: '' });
+  const [studentForm, setStudentForm] = useState({
+    first_name: '', last_name: '', grade_section_id: '',
+    cedula: '', birth_date: '', previous_school: '', address: '',
+  });
   const [studentId, setStudentId] = useState<string | null>(null);
   const [studentPhoto, setStudentPhoto] = useState<string | null>(null);
   const [resolvedParentId, setResolvedParentId] = useState<string | null>(null);
@@ -63,28 +66,46 @@ export const AdmissionsPortal: React.FC = () => {
 
   const availableSections = gradeLevels.find(g => g.id === selectedGradeLevelId)?.grade_sections || [];
 
-  // --- Padre/Madre/Acudiente responsable ---
+  // --- Padre / Madre / Acudiente (hasta 3 responsables, todos opcionales) ---
   interface ParentSuggestion { id: string; first_name: string; last_name: string; email: string }
-  const [parentSearch, setParentSearch] = useState('');
-  const [parentSuggestions, setParentSuggestions] = useState<ParentSuggestion[]>([]);
-  const [selectedParent, setSelectedParent] = useState<ParentSuggestion | null>(null);
-  const [parentRelationship, setParentRelationship] = useState('madre');
-  const [creatingParent, setCreatingParent] = useState(false);
-  const [newParentForm, setNewParentForm] = useState({ first_name: '', last_name: '', email: '', password: '' });
+  interface GuardianSlot {
+    search: string;
+    suggestions: ParentSuggestion[];
+    selected: ParentSuggestion | null;
+    creating: boolean;
+    newForm: { first_name: string; last_name: string; email: string; phone: string; cedula: string; password: string };
+  }
+  const emptyGuardianSlot = (): GuardianSlot => ({
+    search: '', suggestions: [], selected: null, creating: false,
+    newForm: { first_name: '', last_name: '', email: '', phone: '', cedula: '', password: '' },
+  });
+  const [guardianSlots, setGuardianSlots] = useState<Record<'madre' | 'padre' | 'acudiente', GuardianSlot>>({
+    madre: emptyGuardianSlot(), padre: emptyGuardianSlot(), acudiente: emptyGuardianSlot(),
+  });
+  const updateGuardianSlot = (rel: 'madre' | 'padre' | 'acudiente', patch: Partial<GuardianSlot>) => {
+    setGuardianSlots(prev => ({ ...prev, [rel]: { ...prev[rel], ...patch } }));
+  };
 
-  useEffect(() => {
-    if (!parentSearch || selectedParent) {
-      setParentSuggestions([]);
-      return;
-    }
-    const timeout = setTimeout(() => {
-      fetch(`/api/v1/profiles?tenant_id=${DEMO_TENANT_ID}&role=parent&search=${encodeURIComponent(parentSearch)}`)
-        .then(r => r.json())
-        .then(d => setParentSuggestions(d.profiles || []))
-        .catch(() => {});
-    }, 300);
-    return () => clearTimeout(timeout);
-  }, [parentSearch, selectedParent]);
+  const useGuardianSearch = (rel: 'madre' | 'padre' | 'acudiente') => {
+    const slot = guardianSlots[rel];
+    useEffect(() => {
+      if (!slot.search || slot.selected) {
+        if (slot.suggestions.length > 0) updateGuardianSlot(rel, { suggestions: [] });
+        return;
+      }
+      const timeout = setTimeout(() => {
+        fetch(`/api/v1/profiles?tenant_id=${DEMO_TENANT_ID}&role=parent&search=${encodeURIComponent(slot.search)}`)
+          .then(r => r.json())
+          .then(d => updateGuardianSlot(rel, { suggestions: d.profiles || [] }))
+          .catch(() => {});
+      }, 300);
+      return () => clearTimeout(timeout);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [slot.search, slot.selected]);
+  };
+  useGuardianSearch('madre');
+  useGuardianSearch('padre');
+  useGuardianSearch('acudiente');
 
   const handlePhotoSelected = async (file: File | undefined) => {
     if (!file) return;
@@ -107,33 +128,40 @@ export const AdmissionsPortal: React.FC = () => {
       setMessage('❌ Nombre y apellido son requeridos.');
       return;
     }
-    if (!selectedParent && !creatingParent) {
-      setMessage('❌ Busca y selecciona al padre/madre/acudiente responsable, o crea uno nuevo.');
+    const relations: ('madre' | 'padre' | 'acudiente')[] = ['madre', 'padre', 'acudiente'];
+    const hasAnyGuardian = relations.some(rel => guardianSlots[rel].selected || guardianSlots[rel].creating);
+    if (!hasAnyGuardian) {
+      setMessage('❌ Vincula al menos un responsable (madre, padre o acudiente).');
       return;
     }
     setLoading(true);
     setMessage('');
     try {
-      let parentId = selectedParent?.id;
+      const guardianLinks: { parent_id: string; relationship: string }[] = [];
 
-      if (!parentId && creatingParent) {
-        if (!newParentForm.first_name || !newParentForm.last_name || !newParentForm.email || !newParentForm.password) {
-          setMessage('❌ Completa todos los campos del padre/madre/acudiente nuevo.');
-          setLoading(false);
-          return;
+      for (const rel of relations) {
+        const slot = guardianSlots[rel];
+        if (slot.selected) {
+          guardianLinks.push({ parent_id: slot.selected.id, relationship: rel });
+        } else if (slot.creating) {
+          if (!slot.newForm.first_name || !slot.newForm.last_name || !slot.newForm.email || !slot.newForm.password) {
+            setMessage(`❌ Completa todos los campos del/de la ${rel} nuevo(a).`);
+            setLoading(false);
+            return;
+          }
+          const createRes = await fetch('/api/v1/profiles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, role: 'parent', ...slot.newForm }),
+          });
+          const createData = await createRes.json();
+          if (!createData.success) {
+            setMessage(`❌ No se pudo crear el/la ${rel}: ` + (createData.error || ''));
+            setLoading(false);
+            return;
+          }
+          guardianLinks.push({ parent_id: createData.profile.id, relationship: rel });
         }
-        const createRes = await fetch('/api/v1/profiles', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, role: 'parent', ...newParentForm }),
-        });
-        const createData = await createRes.json();
-        if (!createData.success) {
-          setMessage('❌ ' + (createData.error || 'No se pudo crear el padre/madre/acudiente.'));
-          setLoading(false);
-          return;
-        }
-        parentId = createData.profile.id;
       }
 
       const response = await fetch('/api/v1/students', {
@@ -141,8 +169,7 @@ export const AdmissionsPortal: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tenant_id: DEMO_TENANT_ID,
-          parent_id: parentId,
-          relationship: parentRelationship,
+          guardians: guardianLinks,
           photo_url: studentPhoto,
           ...studentForm,
         }),
@@ -150,7 +177,7 @@ export const AdmissionsPortal: React.FC = () => {
       const data = await response.json();
       if (data.success) {
         setStudentId(data.student.id);
-        setResolvedParentId(parentId || null);
+        setResolvedParentId(guardianLinks[0]?.parent_id || null);
         setMessage('✅ Expediente del alumno creado exitosamente.');
         setStep(2);
       } else {
@@ -344,84 +371,117 @@ export const AdmissionsPortal: React.FC = () => {
             </p>
           )}
 
-          <div className="border border-slate-200 rounded-lg p-4 space-y-3 bg-slate-50">
-            <h3 className="text-sm font-bold text-slate-600 flex items-center"><UserPlus className="w-4 h-4 mr-1.5 text-teal-600" /> Padre/Madre/Acudiente Responsable</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <input
+              type="text" placeholder="Cédula / Identificación" value={studentForm.cedula}
+              onChange={e => setStudentForm({ ...studentForm, cedula: e.target.value })}
+              className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Fecha de nacimiento</label>
+              <input
+                type="date" value={studentForm.birth_date}
+                onChange={e => setStudentForm({ ...studentForm, birth_date: e.target.value })}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
+            <input
+              type="text" placeholder="Colegio de procedencia" value={studentForm.previous_school}
+              onChange={e => setStudentForm({ ...studentForm, previous_school: e.target.value })}
+              className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+            <input
+              type="text" placeholder="Dirección" value={studentForm.address}
+              onChange={e => setStudentForm({ ...studentForm, address: e.target.value })}
+              className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+          </div>
 
-            {selectedParent ? (
-              <div className="flex items-center justify-between bg-white rounded-md border border-teal-200 px-3 py-2">
-                <span className="text-sm">
-                  <span className="font-semibold text-slate-700">{selectedParent.first_name} {selectedParent.last_name}</span>
-                  <span className="text-slate-400 ml-2">{selectedParent.email}</span>
-                </span>
-                <button onClick={() => setSelectedParent(null)} className="text-xs font-bold text-rose-600 hover:text-rose-800">Cambiar</button>
-              </div>
-            ) : (
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text" placeholder="Buscar padre/madre existente por nombre o email..." value={parentSearch}
-                  onChange={e => setParentSearch(e.target.value)}
-                  className="w-full border border-slate-300 rounded-md pl-8 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-                {parentSuggestions.length > 0 && (
-                  <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-40 overflow-y-auto">
-                    {parentSuggestions.map(p => (
-                      <button
-                        key={p.id}
-                        onClick={() => { setSelectedParent(p); setParentSearch(''); setParentSuggestions([]); }}
-                        className="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50"
-                      >
-                        {p.first_name} {p.last_name} <span className="text-slate-400">({p.email})</span>
-                      </button>
-                    ))}
+          {RELATIONSHIPS.map(({ value: rel, label }) => {
+            const slot = guardianSlots[rel as 'madre' | 'padre' | 'acudiente'];
+            const key = rel as 'madre' | 'padre' | 'acudiente';
+            return (
+              <div key={rel} className="border border-slate-200 rounded-lg p-4 space-y-3 bg-slate-50">
+                <h3 className="text-sm font-bold text-slate-600 flex items-center"><UserPlus className="w-4 h-4 mr-1.5 text-teal-600" /> {label} (opcional)</h3>
+
+                {slot.selected ? (
+                  <div className="flex items-center justify-between bg-white rounded-md border border-teal-200 px-3 py-2">
+                    <span className="text-sm">
+                      <span className="font-semibold text-slate-700">{slot.selected.first_name} {slot.selected.last_name}</span>
+                      <span className="text-slate-400 ml-2">{slot.selected.email}</span>
+                    </span>
+                    <button onClick={() => updateGuardianSlot(key, { selected: null })} className="text-xs font-bold text-rose-600 hover:text-rose-800">Quitar</button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text" placeholder={`Buscar ${label.toLowerCase()} existente por nombre o email...`} value={slot.search}
+                      onChange={e => updateGuardianSlot(key, { search: e.target.value })}
+                      className="w-full border border-slate-300 rounded-md pl-8 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                    {slot.suggestions.length > 0 && (
+                      <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                        {slot.suggestions.map(p => (
+                          <button
+                            key={p.id}
+                            onClick={() => updateGuardianSlot(key, { selected: p, search: '', suggestions: [] })}
+                            className="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50"
+                          >
+                            {p.first_name} {p.last_name} <span className="text-slate-400">({p.email})</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {!slot.selected && (
+                  <button
+                    onClick={() => updateGuardianSlot(key, { creating: !slot.creating })}
+                    className="text-xs font-bold text-teal-600 hover:text-teal-800 text-left"
+                  >
+                    {slot.creating ? 'Cancelar y buscar existente' : `${label} no está registrado(a): crear nuevo`}
+                  </button>
+                )}
+
+                {!slot.selected && slot.creating && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input
+                      type="text" placeholder="Nombre" value={slot.newForm.first_name}
+                      onChange={e => updateGuardianSlot(key, { newForm: { ...slot.newForm, first_name: e.target.value } })}
+                      className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                    <input
+                      type="text" placeholder="Apellido" value={slot.newForm.last_name}
+                      onChange={e => updateGuardianSlot(key, { newForm: { ...slot.newForm, last_name: e.target.value } })}
+                      className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                    <input
+                      type="email" placeholder="Correo electrónico" value={slot.newForm.email}
+                      onChange={e => updateGuardianSlot(key, { newForm: { ...slot.newForm, email: e.target.value } })}
+                      className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                    <input
+                      type="text" placeholder="Teléfono" value={slot.newForm.phone}
+                      onChange={e => updateGuardianSlot(key, { newForm: { ...slot.newForm, phone: e.target.value } })}
+                      className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                    <input
+                      type="text" placeholder="Cédula" value={slot.newForm.cedula}
+                      onChange={e => updateGuardianSlot(key, { newForm: { ...slot.newForm, cedula: e.target.value } })}
+                      className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                    <input
+                      type="text" placeholder="Contraseña temporal" value={slot.newForm.password}
+                      onChange={e => updateGuardianSlot(key, { newForm: { ...slot.newForm, password: e.target.value } })}
+                      className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
                   </div>
                 )}
               </div>
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
-              <select
-                value={parentRelationship}
-                onChange={e => setParentRelationship(e.target.value)}
-                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-              >
-                {RELATIONSHIPS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
-              {!selectedParent && (
-                <button
-                  onClick={() => setCreatingParent(!creatingParent)}
-                  className="text-xs font-bold text-teal-600 hover:text-teal-800 text-left"
-                >
-                  {creatingParent ? 'Cancelar y buscar existente' : 'No está registrado(a): crear nuevo'}
-                </button>
-              )}
-            </div>
-
-            {!selectedParent && creatingParent && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <input
-                  type="text" placeholder="Nombre" value={newParentForm.first_name}
-                  onChange={e => setNewParentForm({ ...newParentForm, first_name: e.target.value })}
-                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-                <input
-                  type="text" placeholder="Apellido" value={newParentForm.last_name}
-                  onChange={e => setNewParentForm({ ...newParentForm, last_name: e.target.value })}
-                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-                <input
-                  type="email" placeholder="Correo electrónico" value={newParentForm.email}
-                  onChange={e => setNewParentForm({ ...newParentForm, email: e.target.value })}
-                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-                <input
-                  type="text" placeholder="Contraseña temporal" value={newParentForm.password}
-                  onChange={e => setNewParentForm({ ...newParentForm, password: e.target.value })}
-                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-              </div>
-            )}
-          </div>
+            );
+          })}
 
           <button
             onClick={handleCreateStudent}

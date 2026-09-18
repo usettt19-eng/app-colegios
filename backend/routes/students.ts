@@ -85,7 +85,14 @@ router.delete("/:id/guardians/:parentId", async (req: Request, res: Response) =>
 // Crea el expediente de un alumno de primer ingreso (inicio del proceso de admisión)
 router.post("/", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, first_name, last_name, grade_section_id, parent_id, relationship, photo_url } = req.body;
+    const {
+      tenant_id, first_name, last_name, grade_section_id, parent_id, relationship, photo_url,
+      cedula, birth_date, previous_school, address, guardians,
+    } = req.body;
+    // guardians (opcional): [{ parent_id, relationship }] para vincular hasta
+    // 3 responsables (madre/padre/acudiente) al crear el expediente desde
+    // Admisiones. parent_id/relationship sueltos se mantienen por compatibilidad
+    // con otros llamadores (alta rápida del Directorio de Alumnos, importación masiva).
 
     if (!tenant_id || !first_name || !last_name) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, first_name, last_name)" });
@@ -111,7 +118,11 @@ router.post("/", async (req: Request, res: Response) => {
 
     const { data: student, error } = await supabaseAdmin
       .from("students")
-      .insert({ tenant_id, first_name, last_name, grade, section, grade_section_id: grade_section_id || null })
+      .insert({
+        tenant_id, first_name, last_name, grade, section, grade_section_id: grade_section_id || null,
+        cedula: cedula || null, birth_date: birth_date || null,
+        previous_school: previous_school || null, address: address || null,
+      })
       .select()
       .single();
 
@@ -132,7 +143,12 @@ router.post("/", async (req: Request, res: Response) => {
       }
     }
 
-    if (parent_id) {
+    if (Array.isArray(guardians) && guardians.length > 0) {
+      const links = guardians
+        .filter((g: any) => g?.parent_id)
+        .map((g: any) => ({ parent_id: g.parent_id, student_id: student.id, relationship: g.relationship || "acudiente" }));
+      if (links.length > 0) await supabaseAdmin.from("parent_students").insert(links);
+    } else if (parent_id) {
       await supabaseAdmin.from("parent_students").insert({
         parent_id,
         student_id: student.id,
