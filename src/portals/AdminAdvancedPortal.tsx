@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2, History, Bell, Send, Radio, DollarSign, X } from 'lucide-react';
+import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2, History, Bell, Send, Radio, DollarSign, X, Layers } from 'lucide-react';
 
 // Contexto de demostración: en producción tenant_id viene del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -7,7 +7,7 @@ const DEMO_SENDER_ID = '66666666-6666-6666-6666-666666666666';
 
 const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-type TabId = 'terms' | 'courses' | 'schedules' | 'costs' | 'organization' | 'audit' | 'communications';
+type TabId = 'terms' | 'courses' | 'schedules' | 'grades_settings' | 'costs' | 'organization' | 'audit' | 'communications';
 
 interface AuditLog {
   id: string;
@@ -71,6 +71,13 @@ interface ClassGroup {
   academic_terms?: { name: string };
 }
 
+interface GradeLevel {
+  id: string;
+  name: string;
+  sort_order: number;
+  grade_sections: { id: string; name: string }[];
+}
+
 interface FeeSchedule {
   id: string;
   grade: string;
@@ -97,6 +104,12 @@ export const AdminAdvancedPortal: React.FC = () => {
   const [courseForm, setCourseForm] = useState({ code: '', name: '', credits: '' });
   const [classForm, setClassForm] = useState({ term_id: '', course_id: '', name: '', capacity: '30' });
   const [scheduleForm, setScheduleForm] = useState({ class_id: '', day_of_week: '1', start_time: '08:00', end_time: '09:00', room_number: '' });
+
+  // --- Grados y Secciones ---
+  const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
+  const [gradeLevelsLoading, setGradeLevelsLoading] = useState(false);
+  const [gradeLevelForm, setGradeLevelForm] = useState({ name: '', sort_order: '0' });
+  const [sectionForms, setSectionForms] = useState<Record<string, string>>({});
 
   // --- Costos (Tabla de Cargos por Grado) ---
   const [feeSchedules, setFeeSchedules] = useState<FeeSchedule[]>([]);
@@ -271,10 +284,105 @@ export const AdminAdvancedPortal: React.FC = () => {
     setFeeSchedulesLoading(false);
   };
 
+  const loadGradeLevels = async () => {
+    setGradeLevelsLoading(true);
+    try {
+      const response = await fetch(`/api/v1/grade-settings/levels?tenant_id=${DEMO_TENANT_ID}`);
+      const data = await response.json();
+      setGradeLevels(data.gradeLevels || []);
+    } catch {
+      setMessage('❌ No se pudo conectar con el servidor SIS.');
+    }
+    setGradeLevelsLoading(false);
+  };
+
+  const handleCreateGradeLevel = async () => {
+    if (!gradeLevelForm.name) {
+      setMessage('❌ El nombre del grado es requerido.');
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/grade-settings/levels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, name: gradeLevelForm.name, sort_order: Number(gradeLevelForm.sort_order) || 0 }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage('✅ Grado creado.');
+        setGradeLevelForm({ name: '', sort_order: '0' });
+        loadGradeLevels();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo crear el grado.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setLoading(false);
+  };
+
+  const handleDeleteGradeLevel = async (id: string) => {
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/grade-settings/levels/${id}`, { method: 'DELETE' });
+      const data = await response.json();
+      if (data.success) {
+        setGradeLevels(prev => prev.filter(g => g.id !== id));
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo eliminar el grado.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
+  const handleCreateSection = async (gradeLevelId: string) => {
+    const name = sectionForms[gradeLevelId];
+    if (!name) {
+      setMessage('❌ Escribe el nombre de la sección.');
+      return;
+    }
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/grade-settings/sections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, grade_level_id: gradeLevelId, name }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setSectionForms({ ...sectionForms, [gradeLevelId]: '' });
+        loadGradeLevels();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo crear la sección.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
+  const handleDeleteSection = async (id: string) => {
+    setMessage('');
+    try {
+      const response = await fetch(`/api/v1/grade-settings/sections/${id}`, { method: 'DELETE' });
+      const data = await response.json();
+      if (data.success) {
+        loadGradeLevels();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo eliminar la sección.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'organization') loadOrganization();
     if (activeTab === 'audit') loadAudit();
-    if (activeTab === 'costs') loadFeeSchedules();
+    if (activeTab === 'costs') { loadFeeSchedules(); loadGradeLevels(); }
+    if (activeTab === 'grades_settings') loadGradeLevels();
   }, [activeTab]);
 
   const handleCreateFeeSchedule = async () => {
@@ -578,6 +686,12 @@ export const AdminAdvancedPortal: React.FC = () => {
           <CalendarClock className="w-4 h-4 mr-2" /> Horarios
         </button>
         <button
+          onClick={() => setActiveTab('grades_settings')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'grades_settings' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <Layers className="w-4 h-4 mr-2" /> Grados y Secciones
+        </button>
+        <button
           onClick={() => setActiveTab('costs')}
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'costs' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
@@ -822,17 +936,107 @@ export const AdminAdvancedPortal: React.FC = () => {
         </div>
       )}
 
+      {/* Grados y Secciones */}
+      {activeTab === 'grades_settings' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <h2 className="font-bold text-slate-700 flex items-center"><Plus className="w-4 h-4 mr-2 text-rose-600" /> Agregar Grado</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input
+                type="text" placeholder="Nombre (ej. 5to Primaria)" value={gradeLevelForm.name}
+                onChange={e => setGradeLevelForm({ ...gradeLevelForm, name: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 sm:col-span-2"
+              />
+              <input
+                type="number" placeholder="Orden" value={gradeLevelForm.sort_order}
+                onChange={e => setGradeLevelForm({ ...gradeLevelForm, sort_order: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+            <button
+              onClick={handleCreateGradeLevel}
+              disabled={loading}
+              className="flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50 font-semibold"
+            >
+              {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+              Agregar Grado
+            </button>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center">
+              <Layers className="w-4 h-4 mr-2 text-rose-600" />
+              <h2 className="font-bold text-slate-700">Grados del Colegio</h2>
+            </div>
+            {gradeLevelsLoading ? (
+              <div className="flex items-center justify-center py-12 text-slate-400">
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Cargando grados...
+              </div>
+            ) : gradeLevels.length === 0 ? (
+              <p className="p-6 text-sm text-slate-400">Aún no hay grados configurados.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {gradeLevels.map(g => (
+                  <div key={g.id} className="p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-semibold text-slate-700">{g.name}</span>
+                      <button
+                        onClick={() => handleDeleteGradeLevel(g.id)}
+                        className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 p-1 rounded"
+                        title="Eliminar grado"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {g.grade_sections.length === 0 ? (
+                        <span className="text-xs text-slate-400">Sin secciones todavía.</span>
+                      ) : (
+                        g.grade_sections.map(s => (
+                          <span key={s.id} className="flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600">
+                            {s.name}
+                            <button onClick={() => handleDeleteSection(s.id)} className="hover:text-rose-600">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text" placeholder="Nueva sección (ej. A)" value={sectionForms[g.id] || ''}
+                        onChange={e => setSectionForms({ ...sectionForms, [g.id]: e.target.value })}
+                        className="border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                      />
+                      <button
+                        onClick={() => handleCreateSection(g.id)}
+                        className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-md text-sm font-semibold hover:bg-slate-200"
+                      >
+                        Agregar Sección
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Costos: Tabla de Cargos por Grado */}
       {activeTab === 'costs' && (
         <div className="space-y-6">
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
             <h2 className="font-bold text-slate-700 flex items-center"><Plus className="w-4 h-4 mr-2 text-rose-600" /> Agregar Cargo</h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <input
-                type="text" placeholder="Grado (ej. 5to Primaria)" value={feeScheduleForm.grade}
+              <select
+                value={feeScheduleForm.grade}
                 onChange={e => setFeeScheduleForm({ ...feeScheduleForm, grade: e.target.value })}
                 className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
-              />
+              >
+                <option value="">Selecciona el grado...</option>
+                {gradeLevels.map(g => <option key={g.id} value={g.name}>{g.name}</option>)}
+              </select>
               <input
                 type="text" placeholder="Concepto (ej. Matrícula)" value={feeScheduleForm.concept}
                 onChange={e => setFeeScheduleForm({ ...feeScheduleForm, concept: e.target.value })}

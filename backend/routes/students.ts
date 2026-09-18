@@ -8,15 +8,33 @@ const router = Router();
 // Crea el expediente de un alumno de primer ingreso (inicio del proceso de admisión)
 router.post("/", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, first_name, last_name, grade, section, parent_id, photo_url } = req.body;
+    const { tenant_id, first_name, last_name, grade_section_id, parent_id, photo_url } = req.body;
 
     if (!tenant_id || !first_name || !last_name) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, first_name, last_name)" });
     }
 
+    // El alumno se asigna a una sección real del colegio (configurada en
+    // Admin > Grados y Secciones); grade/section quedan denormalizados en
+    // texto porque muchos otros módulos (dashboard, tabla de cargos) los
+    // leen así, pero ya no se escriben a mano.
+    let grade: string | null = null;
+    let section: string | null = null;
+    if (grade_section_id) {
+      const { data: gradeSection } = await supabaseAdmin
+        .from("grade_sections")
+        .select("name, grade_levels(name)")
+        .eq("id", grade_section_id)
+        .single();
+      if (gradeSection) {
+        section = gradeSection.name;
+        grade = (gradeSection as any).grade_levels?.name || null;
+      }
+    }
+
     const { data: student, error } = await supabaseAdmin
       .from("students")
-      .insert({ tenant_id, first_name, last_name, grade, section })
+      .insert({ tenant_id, first_name, last_name, grade, section, grade_section_id: grade_section_id || null })
       .select()
       .single();
 

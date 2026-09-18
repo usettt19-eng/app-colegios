@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ClipboardList, UserPlus, FileUp, FileSignature, CheckCircle2, Loader2, ArrowRight, Stethoscope, IdCard, GraduationCap as GradIcon, FileText, Camera } from 'lucide-react';
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -30,14 +30,32 @@ interface UploadedDoc {
   status: string;
 }
 
+interface GradeLevel {
+  id: string;
+  name: string;
+  grade_sections: { id: string; name: string }[];
+}
+
 export const AdmissionsPortal: React.FC = () => {
   const [step, setStep] = useState<StepId>(1);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
-  const [studentForm, setStudentForm] = useState({ first_name: '', last_name: '', grade: '', section: '' });
+  const [studentForm, setStudentForm] = useState({ first_name: '', last_name: '', grade_section_id: '' });
   const [studentId, setStudentId] = useState<string | null>(null);
   const [studentPhoto, setStudentPhoto] = useState<string | null>(null);
+
+  const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
+  const [selectedGradeLevelId, setSelectedGradeLevelId] = useState('');
+
+  useEffect(() => {
+    fetch(`/api/v1/grade-settings/levels?tenant_id=${DEMO_TENANT_ID}`)
+      .then(r => r.json())
+      .then(d => setGradeLevels(d.gradeLevels || []))
+      .catch(() => {});
+  }, []);
+
+  const availableSections = gradeLevels.find(g => g.id === selectedGradeLevelId)?.grade_sections || [];
 
   const handlePhotoSelected = async (file: File | undefined) => {
     if (!file) return;
@@ -240,17 +258,29 @@ export const AdmissionsPortal: React.FC = () => {
               onChange={e => setStudentForm({ ...studentForm, last_name: e.target.value })}
               className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
-            <input
-              type="text" placeholder="Grado (ej. 5to Primaria)" value={studentForm.grade}
-              onChange={e => setStudentForm({ ...studentForm, grade: e.target.value })}
+            <select
+              value={selectedGradeLevelId}
+              onChange={e => { setSelectedGradeLevelId(e.target.value); setStudentForm({ ...studentForm, grade_section_id: '' }); }}
               className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-            <input
-              type="text" placeholder="Sección" value={studentForm.section}
-              onChange={e => setStudentForm({ ...studentForm, section: e.target.value })}
-              className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
+            >
+              <option value="">Selecciona el grado...</option>
+              {gradeLevels.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+            <select
+              value={studentForm.grade_section_id}
+              onChange={e => setStudentForm({ ...studentForm, grade_section_id: e.target.value })}
+              disabled={!selectedGradeLevelId}
+              className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50"
+            >
+              <option value="">Selecciona la sección...</option>
+              {availableSections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
           </div>
+          {gradeLevels.length === 0 && (
+            <p className="text-xs text-amber-600">
+              Este colegio todavía no tiene grados/secciones configurados. Créalos desde el Portal Administrativo (Grados y Secciones).
+            </p>
+          )}
           <button
             onClick={handleCreateStudent}
             disabled={loading}
