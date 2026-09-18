@@ -153,9 +153,26 @@ Cada tabla tiene `tenant_id` (modelo multi-tenant). El repo vive en GitHub, rama
 
 ## 4. Tarea en curso
 
-Ninguna en este momento. Con esto quedan completos TODOS los ítems "Core" de todo el roadmap y los "Avanzado" de RRHH, Finanzas y Académico (excepto LMS real, bloqueado por credenciales). Quedan pendientes (no iniciados): Admisiones avanzado (examen en línea, firma electrónica), Padres avanzado (billetera/POS cafetería, WhatsApp, geolocalización de buses), y Arquitectura (PWA, API pública, auditoría ampliada). Backlog técnico interno (§5.2) ya resuelto en lo que no estaba bloqueado.
+**RBAC (Role-Based Access Control) por sección de portal — RESUELTO**
 
-Tarea completada justo antes: personal expatriado/honorarios profesionales + primera versión (sin desglose) del acumulado mensual de nómina.
+Se implementó un sistema completo y granular de control de acceso basado en roles:
+
+- **Esquema de base de datos** (5 tablas nuevas): `roles` (roles personalizados por tenant), `portal_sections` (registro de todas las secciones de portal que se pueden proteger), `permissions` (permisos granulares: view/create/edit/delete/approve/calculate/schedule/export), `role_permissions` (many-to-many entre roles y permisos), `profile_role_assignments` (asignación de perfiles a roles, con alcance opcional por departamento).
+- **Seeding automático**: 30 secciones de portal (Admin, Finance, Corporate/ERP, Admissions, Teacher, Parent) con 8 tipos de permisos base por sección.
+- **RLS habilitado** en todas las tablas de RBAC.
+- **Middleware de backend** (`backend/middleware/rbac.ts`): carga permisos del usuario en cada request, proporciona helpers `checkPermission()` y middleware `requirePermission()` para proteger endpoints.
+- **API completa** (`backend/routes/rbac.ts`): CRUD de roles, asignación de permisos a roles, asignación de roles a staff (6 endpoints GET/POST/PATCH/DELETE, cuidadosamente implementados para evitar el bug de PostgREST 300 Multiple Choices).
+- **Interfaz de Admin** (`src/portals/RBACManager.tsx`): componente React con dos modos:
+  * **Gestión de roles**: crear roles, ver/asignar/remover permisos por sección de portal (UI agrupa por portal para claridad).
+  * **Asignación a staff**: asignar/remover roles a miembros del personal (lista de staff, roles asignados, roles disponibles a asignar).
+- **Compatible hacia atrás**: usuario sin rol explícito en RBAC mantiene acceso según `profiles.role` genérico (admin/teacher/guard/parent/super_admin). `super_admin` siempre bypasa RBAC.
+- **Compatible con Fase 2 auth**: funciona inmediatamente en portales que ya tienen login real (Parent, Teacher, SuperAdmin); otros portales pueden adoptar gradualmente una vez migrados a Fase 2.
+
+Verificado: TypeScript lint limpio, esquema SQL aplicado contra producción, FKs desambiguadas en todos los embeds, API testeable con los endpoints.
+
+Con esto quedan completos TODOS los ítems "Core" de todo el roadmap, los "Avanzado" de RRHH, Finanzas y Académico (excepto LMS real, bloqueado por credenciales), y el backlog técnico "RBAC granular" (§5.2). Quedan pendientes (no iniciados): Admisiones avanzado (examen en línea, firma electrónica), Padres avanzado (billetera/POS cafetería, WhatsApp, geolocalización de buses), Arquitectura (PWA, API pública, auditoría ampliada), y migración de 4 portales a Fase 2 auth (Admin, Corporate, Finance, Admissions) — aunque RBAC está listo para usarse una vez esos portales tengan auth real.
+
+Tarea completada justo antes RBAC: personal expatriado/honorarios profesionales + acumulado mensual de nómina con desglose por tipo de contratación.
 
 Tarea completada justo antes: nómina configurable por país — investigación + implementación completa del alcance "básico + mes extra con cuota propia" elegido por el usuario. Verificado con `execute_sql` directo contra producción (Colegio Demo → Panamá → CSS 9.75%/13.25%, Décimo Tercer Mes 7.25% propio, confirmado).
 
@@ -220,7 +237,7 @@ El usuario está pegando, sección por sección, una lista de posibles mejoras p
 
 ### 5.2 Backlog técnico interno
 
-- **RBAC granular por sección de portal para el staff** (mencionado por el usuario, no iniciado): hoy solo existe `profiles.role` (admin/teacher/guard/parent/super_admin) sin permisos finos dentro de cada portal — cualquier admin ve/edita todo el Admin/ERP/Finanzas. Probablemente requiera: tabla de permisos (por rol o por perfil individual, quizá ligada a `departments`), middleware de autorización por sección, y UI en Admin para asignar permisos. Bloqueado en la práctica por que la mayoría de portales (Admin, ERP, Finanzas, Admisiones) todavía no tienen Fase 2 auth real — probablemente haya que resolver eso primero o en paralelo.
+- ~~**RBAC granular por sección de portal para el staff**~~ **RESUELTO** — ver sección 3/4 (RBAC implementado con 5 tablas nuevas, middleware, API, y UI de Admin).
 - Migrar Admisiones, Portal Corporativo, Portal de Finanzas y Portal Admin (aparte de Super Admin) a auth real (Fase 2).
 - Integración saliente con SafeSmartPickup (pendiente de credenciales de API del usuario).
 - ~~Subida real de archivos a Supabase Storage para `student_documents`, `staff_documents` y las cotizaciones de `purchase_orders`~~ **RESUELTO** — ver sección 3/4.
