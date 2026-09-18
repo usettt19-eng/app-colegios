@@ -163,6 +163,7 @@ export const AdminAdvancedPortal: React.FC = () => {
   const [doors, setDoors] = useState<ExitDoor[]>([]);
   const [departmentForm, setDepartmentForm] = useState({ name: '', head_id: '' });
   const [doorForm, setDoorForm] = useState({ name: '' });
+  const [staffForm, setStaffForm] = useState({ first_name: '', last_name: '', email: '', password: '', role: 'teacher', phone: '' });
   const [assignForm, setAssignForm] = useState<{ staff_id: string; department_id: string; reports_to: string }>({ staff_id: '', department_id: '', reports_to: '' });
 
   // --- Auditoría y Notificaciones ---
@@ -476,6 +477,41 @@ export const AdminAdvancedPortal: React.FC = () => {
     } catch {
       setMessage('❌ Error de conexión.');
     }
+  };
+
+  const handleCreateStaffMember = async () => {
+    if (!staffForm.first_name || !staffForm.last_name || !staffForm.email || !staffForm.password) {
+      setMessage('❌ Completa nombre, apellido, email y contraseña provisional.');
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/v1/profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          email: staffForm.email,
+          password: staffForm.password,
+          first_name: staffForm.first_name,
+          last_name: staffForm.last_name,
+          role: staffForm.role,
+          phone: staffForm.phone || null,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessage(`✅ Cuenta creada. Ya puede iniciar sesión con ${staffForm.email}.`);
+        setStaffForm({ first_name: '', last_name: '', email: '', password: '', role: 'teacher', phone: '' });
+        loadOrganization();
+      } else {
+        setMessage('❌ ' + (data.error || 'No se pudo crear la cuenta.'));
+      }
+    } catch {
+      setMessage('❌ Error de conexión.');
+    }
+    setLoading(false);
   };
 
   const handleCreateDepartment = async () => {
@@ -1551,6 +1587,55 @@ export const AdminAdvancedPortal: React.FC = () => {
       {/* Organización: Departamentos, Jerarquía y Puertas de Salida */}
       {activeTab === 'organization' && (
         <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <h2 className="font-bold text-slate-700 flex items-center"><Users2 className="w-4 h-4 mr-2 text-rose-600" /> Agregar Docente / Staff</h2>
+            <p className="text-sm text-slate-500">Crea la cuenta real de acceso (Supabase Auth) de un docente o miembro del staff. Con ella podrá iniciar sesión en su portal.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input
+                type="text" placeholder="Nombre" value={staffForm.first_name}
+                onChange={e => setStaffForm({ ...staffForm, first_name: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <input
+                type="text" placeholder="Apellido" value={staffForm.last_name}
+                onChange={e => setStaffForm({ ...staffForm, last_name: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <input
+                type="email" placeholder="Email" value={staffForm.email}
+                onChange={e => setStaffForm({ ...staffForm, email: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <input
+                type="text" placeholder="Contraseña provisional" value={staffForm.password}
+                onChange={e => setStaffForm({ ...staffForm, password: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              <select
+                value={staffForm.role}
+                onChange={e => setStaffForm({ ...staffForm, role: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              >
+                <option value="teacher">Docente</option>
+                <option value="admin">Administrador del colegio</option>
+                <option value="guard">Guardia / Portero</option>
+              </select>
+              <input
+                type="text" placeholder="Teléfono (opcional)" value={staffForm.phone}
+                onChange={e => setStaffForm({ ...staffForm, phone: e.target.value })}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+            <button
+              onClick={handleCreateStaffMember}
+              disabled={loading}
+              className="flex items-center px-4 py-2 bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50 font-semibold"
+            >
+              {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+              Crear Cuenta
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
               <h2 className="font-bold text-slate-700 flex items-center"><Building2 className="w-4 h-4 mr-2 text-rose-600" /> Crear Departamento</h2>

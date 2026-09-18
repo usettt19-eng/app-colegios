@@ -40,7 +40,8 @@ Cada tabla tiene `tenant_id` (modelo multi-tenant). El repo vive en GitHub, rama
 ## 3. Módulos construidos (funcionando, deployado)
 
 - **Portal de Padres**: Dashboard/Resumen Ejecutivo, Centro de Pagos (`fee_schedules` + generación de facturas), Notas y Agendas, Mensajería.
-- **Portal Docente**: tareas/asignaciones con tipo (tarea/examen/actividad/proyecto), notas, **Notas Finales** (calificación final + generar/publicar boletín con un clic), **Mensajería** (puede escribirle a padres).
+- **Portal Docente**: tareas/asignaciones con tipo (tarea/examen/actividad/proyecto), notas, **Notas Finales** (calificación final + generar/publicar boletín con un clic), **Mensajería** (puede escribirle a padres). Tiene su propio login real (Supabase Auth, gate por role='teacher'), accesible desde "VER PORTAL DOCENTE" en el nav.
+- **Alta de Docentes/Staff** (Admin → Organización): formulario "Agregar Docente / Staff" que crea la cuenta real (Supabase Auth + `profiles`) vía `POST /api/v1/profiles` con rol `teacher` / `admin` / `guard` (el enum `user_role` en la DB es `admin|parent|teacher|guard|super_admin`, **no existe** el rol `'staff'` aunque algún código viejo de `communications.ts` lo referencie — ojo con eso). Antes de esto no existía NINGÚN lugar en la UI para crear un docente; el backend ya lo soportaba pero solo estaba conectado para crear padres/acudientes.
 - **Admin → Costos**: pantalla para gestionar `fee_schedules` (grado ahora es un `<select>` desde el catálogo de grados, no texto libre).
 - **Auth real (Fase 2)**: login con Supabase Auth para Padres, Docentes y Super Admin.
 - **Super Admin**: portal para crear colegios (tenants) y sus administradores (usa `supabaseAdmin.auth.admin.createUser`, no el truco de SQL crudo usado solo para sembrar los usuarios demo).
@@ -55,7 +56,7 @@ Cada tabla tiene `tenant_id` (modelo multi-tenant). El repo vive en GitHub, rama
 
 ## 4. Tarea en curso
 
-Ninguna en este momento. Última tarea completada: mover "horas semanales" de `courses` (un solo valor por curso) a `course_grade_levels.weekly_hours` (un valor por curso+grado) y agregar selector de grado a la Matriz de Plan de Estudios, a pedido del usuario ("la matemática de primer grado no es la misma que de segundo grado" + la matriz no cabría en pantalla con 13+ grados y kinder). Migración aplicada, backend y frontend actualizados, typecheck limpio, verificado con Playwright.
+Ninguna en este momento. Última tarea completada: formulario "Agregar Docente / Staff" en Admin → Organización (el usuario preguntó dónde se crean los docentes y no existía ningún lugar para hacerlo). Confirmado que el Portal Docente con login real YA existía de antes (Fase 2 auth); no hubo que crearlo, solo el alta de cuentas. Typecheck limpio, verificado con Playwright (form + pantalla de login del portal docente).
 
 ## 5. Backlog conocido (no urgente, no iniciado)
 
