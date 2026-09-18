@@ -5,6 +5,7 @@ import { ParentDirectory } from './ParentDirectory';
 import { BulkImport } from './BulkImport';
 import { TransportManager } from './TransportManager';
 import { CurriculumMatrix } from './CurriculumMatrix';
+import { StaffDocuments } from './StaffDocuments';
 
 // Contexto de demostración: en producción tenant_id viene del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -164,6 +165,7 @@ export const AdminAdvancedPortal: React.FC = () => {
   const [departmentForm, setDepartmentForm] = useState({ name: '', head_id: '' });
   const [doorForm, setDoorForm] = useState({ name: '' });
   const [staffForm, setStaffForm] = useState({ first_name: '', last_name: '', email: '', password: '', role: 'teacher', phone: '' });
+  const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
   const [assignForm, setAssignForm] = useState<{ staff_id: string; department_id: string; reports_to: string }>({ staff_id: '', department_id: '', reports_to: '' });
 
   // --- Auditoría y Notificaciones ---
@@ -1736,15 +1738,33 @@ export const AdminAdvancedPortal: React.FC = () => {
                     <th className="px-4 py-3 font-semibold">NOMBRE</th>
                     <th className="px-4 py-3 font-semibold">ROL</th>
                     <th className="px-4 py-3 font-semibold">DEPARTAMENTO</th>
+                    <th className="px-4 py-3 font-semibold">EXPEDIENTE</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {staff.map(s => (
-                    <tr key={s.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 font-semibold">{s.first_name} {s.last_name}</td>
-                      <td className="px-4 py-3 text-slate-500">{s.role}</td>
-                      <td className="px-4 py-3 text-slate-500">{s.departments?.name || 'Sin asignar'}</td>
-                    </tr>
+                    <React.Fragment key={s.id}>
+                      <tr className="hover:bg-slate-50">
+                        <td className="px-4 py-3 font-semibold">{s.first_name} {s.last_name}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.role}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.departments?.name || 'Sin asignar'}</td>
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => setExpandedStaffId(expandedStaffId === s.id ? null : s.id)}
+                            className="text-xs font-bold text-rose-600 hover:underline"
+                          >
+                            {expandedStaffId === s.id ? 'Ocultar' : 'Ver expediente'}
+                          </button>
+                        </td>
+                      </tr>
+                      {expandedStaffId === s.id && (
+                        <tr>
+                          <td colSpan={4} className="p-0">
+                            <StaffDocuments tenantId={DEMO_TENANT_ID} profileId={s.id} reviewerId={DEMO_SENDER_ID} />
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>

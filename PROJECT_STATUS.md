@@ -42,6 +42,7 @@ Cada tabla tiene `tenant_id` (modelo multi-tenant). El repo vive en GitHub, rama
 - **Portal de Padres**: Dashboard/Resumen Ejecutivo, Centro de Pagos (`fee_schedules` + generación de facturas), Notas y Agendas, Mensajería.
 - **Portal Docente**: tareas/asignaciones con tipo (tarea/examen/actividad/proyecto), notas, **Notas Finales** (calificación final + generar/publicar boletín con un clic), **Mensajería** (puede escribirle a padres). Tiene su propio login real (Supabase Auth, gate por role='teacher'), accesible desde "VER PORTAL DOCENTE" en el nav.
 - **Alta de Docentes/Staff** (Admin → Organización): formulario "Agregar Docente / Staff" que crea la cuenta real (Supabase Auth + `profiles`) vía `POST /api/v1/profiles` con rol `teacher` / `admin` / `guard` (el enum `user_role` en la DB es `admin|parent|teacher|guard|super_admin`, **no existe** el rol `'staff'` aunque algún código viejo de `communications.ts` lo referencie — ojo con eso). Antes de esto no existía NINGÚN lugar en la UI para crear un docente; el backend ya lo soportaba pero solo estaba conectado para crear padres/acudientes.
+- **Expediente documental de Staff/Docentes**: tabla `staff_documents` (título/diploma, certificación, CV, carta de experiencia laboral, antecedentes, cédula, contrato, otro), mismo patrón que `student_documents` (RLS: el propio docente ve/sube los suyos vía `profile_id = auth.uid()`, admin del tenant gestiona todo). Backend en `backend/routes/staffDocuments.ts` montado en `/api/v1/staff-documents` (`GET /:profile_id`, `POST /upload`, `POST /review`). En la tabla "Organigrama del Staff" (Admin → Organización) cada fila tiene un botón "Ver expediente" que expande `<StaffDocuments>` inline: subir documento (select de tipo + `<input type=file>`) y botones Verificar/Rechazar por documento pendiente. **Nota**: igual que `student_documents`, la subida de archivo real a Storage está mockeada (solo se guarda un `file_url` de referencia con el nombre del archivo, no el binario) — es una limitación heredada del patrón ya existente en Admisiones, no algo nuevo de esta feature; subir el archivo real a Supabase Storage queda en el backlog para ambos casos (alumnos y staff). Aún no hay UI para que el propio docente vea/suba su expediente desde el Portal Docente (solo se construyó el lado Admin, que es lo que se pidió).
 - **Admin → Costos**: pantalla para gestionar `fee_schedules` (grado ahora es un `<select>` desde el catálogo de grados, no texto libre).
 - **Auth real (Fase 2)**: login con Supabase Auth para Padres, Docentes y Super Admin.
 - **Super Admin**: portal para crear colegios (tenants) y sus administradores (usa `supabaseAdmin.auth.admin.createUser`, no el truco de SQL crudo usado solo para sembrar los usuarios demo).
@@ -56,12 +57,14 @@ Cada tabla tiene `tenant_id` (modelo multi-tenant). El repo vive en GitHub, rama
 
 ## 4. Tarea en curso
 
-Ninguna en este momento. Última tarea completada: formulario "Agregar Docente / Staff" en Admin → Organización (el usuario preguntó dónde se crean los docentes y no existía ningún lugar para hacerlo). Confirmado que el Portal Docente con login real YA existía de antes (Fase 2 auth); no hubo que crearlo, solo el alta de cuentas. Typecheck limpio, verificado con Playwright (form + pantalla de login del portal docente).
+Ninguna en este momento. Última tarea completada: expediente documental del staff/docentes (título, CV, experiencia laboral, antecedentes, etc.) en Admin → Organización, a pedido del usuario tras crear su primera cuenta de docente. Migración aplicada, backend nuevo, UI embebida en la tabla de staff, typecheck limpio, servidor arranca sin errores (sandbox sin DB real no permite ver filas de staff, pero la ruta y el componente están verificados).
 
 ## 5. Backlog conocido (no urgente, no iniciado)
 
 - Migrar Admisiones, Portal Corporativo y Portal Admin (aparte de Super Admin) a auth real (Fase 2).
 - Integración saliente con SafeSmartPickup (pendiente de credenciales de API del usuario).
+- Subida real de archivos a Supabase Storage para `student_documents` y `staff_documents` (hoy ambos mockean `file_url` con solo el nombre del archivo, no suben el binario).
+- UI para que el propio docente vea/suba su expediente desde el Portal Docente (hoy `staff_documents` solo tiene UI del lado Admin; el backend ya lo permitiría vía RLS `profile_id = auth.uid()`).
 
 ## 6. Notas operativas / cosas que ya se rompieron una vez (para no repetirlas)
 
