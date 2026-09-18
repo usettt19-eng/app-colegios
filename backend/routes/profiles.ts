@@ -4,23 +4,32 @@ import { uploadProfilePhoto } from "../services/photoStorage";
 
 const router = Router();
 
-// GET /api/v1/profiles?tenant_id=...&role=parent&search=...
-// Directorio/buscador de perfiles del colegio (usado para vincular un
-// padre existente a un alumno, desde Admisiones o el Directorio de Alumnos)
+// GET /api/v1/profiles?tenant_id=...&role=parent&search=...&with_children=true
+// Directorio/buscador de perfiles del colegio. Se usa tanto para el
+// buscador de "vincular padre existente" (Admisiones/Directorio de
+// Alumnos, sin with_children, limitado a 50) como para el Directorio de
+// Padres completo (con_children=true trae los hijos vinculados de cada uno).
 router.get("/", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, role, search } = req.query;
+    const { tenant_id, role, search, with_children } = req.query;
     if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    const selectFields = with_children === "true"
+      ? "id, first_name, last_name, email, phone, cedula, role, parent_students(relationship, students(id, first_name, last_name, grade, section))"
+      : "id, first_name, last_name, email, role";
 
     let query = supabaseAdmin
       .from("profiles")
-      .select("id, first_name, last_name, email, role")
+      .select(selectFields)
       .eq("tenant_id", tenant_id);
 
     if (role) query = query.eq("role", role);
     if (search) query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%`);
 
-    const { data, error } = await query.order("first_name").limit(50);
+    query = query.order("first_name");
+    if (with_children !== "true") query = query.limit(50);
+
+    const { data, error } = await query;
     if (error) return res.status(500).json({ error: "Error al consultar los perfiles." });
 
     return res.status(200).json({ success: true, profiles: data });

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2, History, Bell, Send, Radio, DollarSign, X, Layers, Upload, Bus } from 'lucide-react';
 import { StudentDirectory } from './StudentDirectory';
+import { ParentDirectory } from './ParentDirectory';
 import { BulkImport } from './BulkImport';
 import { TransportManager } from './TransportManager';
 
@@ -107,6 +108,9 @@ export const AdminAdvancedPortal: React.FC = () => {
   const [courseForm, setCourseForm] = useState({ code: '', name: '', credits: '' });
   const [classForm, setClassForm] = useState({ term_id: '', course_id: '', name: '', capacity: '30' });
   const [scheduleForm, setScheduleForm] = useState({ class_id: '', day_of_week: '1', start_time: '08:00', end_time: '09:00', room_number: '' });
+
+  // --- Alumnos y Padres (subvista) ---
+  const [studentsSubView, setStudentsSubView] = useState<'students' | 'parents'>('students');
 
   // --- Grados y Secciones ---
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
@@ -1045,7 +1049,25 @@ export const AdminAdvancedPortal: React.FC = () => {
       )}
 
       {/* Alumnos y Padres */}
-      {activeTab === 'students' && <StudentDirectory tenantId={DEMO_TENANT_ID} />}
+      {activeTab === 'students' && (
+        <div className="space-y-4">
+          <div className="flex gap-2">
+            <button
+              onClick={() => setStudentsSubView('students')}
+              className={`px-3 py-1.5 rounded-md text-sm font-bold ${studentsSubView === 'students' ? 'bg-rose-600 text-white' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+            >
+              Ver por Alumno
+            </button>
+            <button
+              onClick={() => setStudentsSubView('parents')}
+              className={`px-3 py-1.5 rounded-md text-sm font-bold ${studentsSubView === 'parents' ? 'bg-rose-600 text-white' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+            >
+              Ver por Padre
+            </button>
+          </div>
+          {studentsSubView === 'students' ? <StudentDirectory tenantId={DEMO_TENANT_ID} /> : <ParentDirectory tenantId={DEMO_TENANT_ID} />}
+        </div>
+      )}
 
       {/* Importación Masiva */}
       {activeTab === 'bulk_import' && <BulkImport tenantId={DEMO_TENANT_ID} />}
