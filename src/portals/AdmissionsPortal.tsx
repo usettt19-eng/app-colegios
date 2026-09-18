@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ClipboardList, UserPlus, FileUp, FileSignature, CheckCircle2, Loader2, ArrowRight, Stethoscope, IdCard, GraduationCap as GradIcon, FileText, Camera } from 'lucide-react';
+import { ClipboardList, UserPlus, FileUp, FileSignature, CheckCircle2, Loader2, ArrowRight, Stethoscope, IdCard, GraduationCap as GradIcon, FileText, Camera, Search } from 'lucide-react';
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -10,10 +10,15 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-// Contexto de demostración: en producción tenant_id/parent_id vienen del token JWT de Supabase Auth (Fase 2)
+// Contexto de demostración: en producción tenant_id viene del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
-const DEMO_PARENT_ID = '33333333-3333-3333-3333-333333333333';
 const DEMO_TERM_ID = '55555555-5555-5555-5555-555555555555';
+
+const RELATIONSHIPS = [
+  { value: 'madre', label: 'Madre' },
+  { value: 'padre', label: 'Padre' },
+  { value: 'acudiente', label: 'Acudiente' },
+];
 
 type StepId = 1 | 2 | 3 | 4;
 
@@ -44,6 +49,7 @@ export const AdmissionsPortal: React.FC = () => {
   const [studentForm, setStudentForm] = useState({ first_name: '', last_name: '', grade_section_id: '' });
   const [studentId, setStudentId] = useState<string | null>(null);
   const [studentPhoto, setStudentPhoto] = useState<string | null>(null);
+  const [resolvedParentId, setResolvedParentId] = useState<string | null>(null);
 
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
   const [selectedGradeLevelId, setSelectedGradeLevelId] = useState('');
@@ -56,6 +62,29 @@ export const AdmissionsPortal: React.FC = () => {
   }, []);
 
   const availableSections = gradeLevels.find(g => g.id === selectedGradeLevelId)?.grade_sections || [];
+
+  // --- Padre/Madre/Acudiente responsable ---
+  interface ParentSuggestion { id: string; first_name: string; last_name: string; email: string }
+  const [parentSearch, setParentSearch] = useState('');
+  const [parentSuggestions, setParentSuggestions] = useState<ParentSuggestion[]>([]);
+  const [selectedParent, setSelectedParent] = useState<ParentSuggestion | null>(null);
+  const [parentRelationship, setParentRelationship] = useState('madre');
+  const [creatingParent, setCreatingParent] = useState(false);
+  const [newParentForm, setNewParentForm] = useState({ first_name: '', last_name: '', email: '', password: '' });
+
+  useEffect(() => {
+    if (!parentSearch || selectedParent) {
+      setParentSuggestions([]);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      fetch(`/api/v1/profiles?tenant_id=${DEMO_TENANT_ID}&role=parent&search=${encodeURIComponent(parentSearch)}`)
+        .then(r => r.json())
+        .then(d => setParentSuggestions(d.profiles || []))
+        .catch(() => {});
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [parentSearch, selectedParent]);
 
   const handlePhotoSelected = async (file: File | undefined) => {
     if (!file) return;
@@ -78,17 +107,50 @@ export const AdmissionsPortal: React.FC = () => {
       setMessage('❌ Nombre y apellido son requeridos.');
       return;
     }
+    if (!selectedParent && !creatingParent) {
+      setMessage('❌ Busca y selecciona al padre/madre/acudiente responsable, o crea uno nuevo.');
+      return;
+    }
     setLoading(true);
     setMessage('');
     try {
+      let parentId = selectedParent?.id;
+
+      if (!parentId && creatingParent) {
+        if (!newParentForm.first_name || !newParentForm.last_name || !newParentForm.email || !newParentForm.password) {
+          setMessage('❌ Completa todos los campos del padre/madre/acudiente nuevo.');
+          setLoading(false);
+          return;
+        }
+        const createRes = await fetch('/api/v1/profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, role: 'parent', ...newParentForm }),
+        });
+        const createData = await createRes.json();
+        if (!createData.success) {
+          setMessage('❌ ' + (createData.error || 'No se pudo crear el padre/madre/acudiente.'));
+          setLoading(false);
+          return;
+        }
+        parentId = createData.profile.id;
+      }
+
       const response = await fetch('/api/v1/students', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenant_id: DEMO_TENANT_ID, parent_id: DEMO_PARENT_ID, photo_url: studentPhoto, ...studentForm }),
+        body: JSON.stringify({
+          tenant_id: DEMO_TENANT_ID,
+          parent_id: parentId,
+          relationship: parentRelationship,
+          photo_url: studentPhoto,
+          ...studentForm,
+        }),
       });
       const data = await response.json();
       if (data.success) {
         setStudentId(data.student.id);
+        setResolvedParentId(parentId || null);
         setMessage('✅ Expediente del alumno creado exitosamente.');
         setStep(2);
       } else {
@@ -116,7 +178,7 @@ export const AdmissionsPortal: React.FC = () => {
         body: JSON.stringify({
           tenant_id: DEMO_TENANT_ID,
           student_id: studentId,
-          uploader_id: DEMO_PARENT_ID,
+          uploader_id: resolvedParentId,
           doc_type: selectedDocType,
           title: `${docTypeLabel} - ${fileName}`,
           file_url: fakeFileUrl,
@@ -156,7 +218,7 @@ export const AdmissionsPortal: React.FC = () => {
           body: JSON.stringify({
             tenant_id: DEMO_TENANT_ID,
             student_id: studentId,
-            parent_id: DEMO_PARENT_ID,
+            parent_id: resolvedParentId,
             template_id: '77777777-7777-7777-7777-777777777777',
             enrollment_id: data.enrollment.id,
           }),
@@ -281,6 +343,86 @@ export const AdmissionsPortal: React.FC = () => {
               Este colegio todavía no tiene grados/secciones configurados. Créalos desde el Portal Administrativo (Grados y Secciones).
             </p>
           )}
+
+          <div className="border border-slate-200 rounded-lg p-4 space-y-3 bg-slate-50">
+            <h3 className="text-sm font-bold text-slate-600 flex items-center"><UserPlus className="w-4 h-4 mr-1.5 text-teal-600" /> Padre/Madre/Acudiente Responsable</h3>
+
+            {selectedParent ? (
+              <div className="flex items-center justify-between bg-white rounded-md border border-teal-200 px-3 py-2">
+                <span className="text-sm">
+                  <span className="font-semibold text-slate-700">{selectedParent.first_name} {selectedParent.last_name}</span>
+                  <span className="text-slate-400 ml-2">{selectedParent.email}</span>
+                </span>
+                <button onClick={() => setSelectedParent(null)} className="text-xs font-bold text-rose-600 hover:text-rose-800">Cambiar</button>
+              </div>
+            ) : (
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text" placeholder="Buscar padre/madre existente por nombre o email..." value={parentSearch}
+                  onChange={e => setParentSearch(e.target.value)}
+                  className="w-full border border-slate-300 rounded-md pl-8 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                {parentSuggestions.length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                    {parentSuggestions.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => { setSelectedParent(p); setParentSearch(''); setParentSuggestions([]); }}
+                        className="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50"
+                      >
+                        {p.first_name} {p.last_name} <span className="text-slate-400">({p.email})</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+              <select
+                value={parentRelationship}
+                onChange={e => setParentRelationship(e.target.value)}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+              >
+                {RELATIONSHIPS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+              {!selectedParent && (
+                <button
+                  onClick={() => setCreatingParent(!creatingParent)}
+                  className="text-xs font-bold text-teal-600 hover:text-teal-800 text-left"
+                >
+                  {creatingParent ? 'Cancelar y buscar existente' : 'No está registrado(a): crear nuevo'}
+                </button>
+              )}
+            </div>
+
+            {!selectedParent && creatingParent && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <input
+                  type="text" placeholder="Nombre" value={newParentForm.first_name}
+                  onChange={e => setNewParentForm({ ...newParentForm, first_name: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <input
+                  type="text" placeholder="Apellido" value={newParentForm.last_name}
+                  onChange={e => setNewParentForm({ ...newParentForm, last_name: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <input
+                  type="email" placeholder="Correo electrónico" value={newParentForm.email}
+                  onChange={e => setNewParentForm({ ...newParentForm, email: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <input
+                  type="text" placeholder="Contraseña temporal" value={newParentForm.password}
+                  onChange={e => setNewParentForm({ ...newParentForm, password: e.target.value })}
+                  className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+            )}
+          </div>
+
           <button
             onClick={handleCreateStudent}
             disabled={loading}

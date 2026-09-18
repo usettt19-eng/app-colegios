@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2, History, Bell, Send, Radio, DollarSign, X, Layers } from 'lucide-react';
+import { StudentDirectory } from './StudentDirectory';
 
 // Contexto de demostración: en producción tenant_id viene del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -7,7 +8,7 @@ const DEMO_SENDER_ID = '66666666-6666-6666-6666-666666666666';
 
 const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-type TabId = 'terms' | 'courses' | 'schedules' | 'grades_settings' | 'costs' | 'organization' | 'audit' | 'communications';
+type TabId = 'terms' | 'courses' | 'schedules' | 'grades_settings' | 'students' | 'costs' | 'organization' | 'audit' | 'communications';
 
 interface AuditLog {
   id: string;
@@ -692,6 +693,12 @@ export const AdminAdvancedPortal: React.FC = () => {
           <Layers className="w-4 h-4 mr-2" /> Grados y Secciones
         </button>
         <button
+          onClick={() => setActiveTab('students')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'students' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <Users2 className="w-4 h-4 mr-2" /> Alumnos y Padres
+        </button>
+        <button
           onClick={() => setActiveTab('costs')}
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'costs' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
@@ -1022,6 +1029,9 @@ export const AdminAdvancedPortal: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Alumnos y Padres */}
+      {activeTab === 'students' && <StudentDirectory tenantId={DEMO_TENANT_ID} />}
 
       {/* Costos: Tabla de Cargos por Grado */}
       {activeTab === 'costs' && (

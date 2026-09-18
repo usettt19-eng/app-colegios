@@ -4,11 +4,88 @@ import { uploadProfilePhoto } from "../services/photoStorage";
 
 const router = Router();
 
+// GET /api/v1/students?tenant_id=...&search=...
+// Directorio de alumnos del colegio (para el Portal Administrativo):
+// lista todos los alumnos con su grado/sección y los padres vinculados.
+router.get("/", async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, search } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: "Falta tenant_id" });
+
+    let query = supabaseAdmin
+      .from("students")
+      .select("id, first_name, last_name, grade, section, photo_url, parent_students(relationship, profiles(id, first_name, last_name, email, role))")
+      .eq("tenant_id", tenant_id)
+      .order("last_name");
+
+    if (search) query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%`);
+
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ error: "Error al consultar el directorio de alumnos." });
+
+    return res.status(200).json({ success: true, students: data });
+  } catch (error: any) {
+    console.error("Error en GET /api/v1/students:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// POST /api/v1/students/:id/guardians
+// Vincula un padre/madre/acudiente EXISTENTE a un alumno (Directorio de
+// Alumnos y Admisiones)
+router.post("/:id/guardians", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { parent_id, relationship } = req.body;
+
+    if (!parent_id || !relationship) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos (parent_id, relationship)" });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("parent_students")
+      .upsert({ student_id: id, parent_id, relationship }, { onConflict: "parent_id, student_id" })
+      .select()
+      .single();
+
+    if (error || !data) {
+      console.error("Error al vincular padre:", error);
+      return res.status(500).json({ error: "No se pudo vincular al padre con el alumno." });
+    }
+
+    return res.status(201).json({ success: true, message: "Padre vinculado al alumno.", link: data });
+  } catch (error: any) {
+    console.error("Error en POST /api/v1/students/:id/guardians:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// DELETE /api/v1/students/:id/guardians/:parentId
+// Desvincula un padre/madre/acudiente de un alumno
+router.delete("/:id/guardians/:parentId", async (req: Request, res: Response) => {
+  try {
+    const { id, parentId } = req.params;
+
+    const { error } = await supabaseAdmin
+      .from("parent_students")
+      .delete()
+      .eq("student_id", id)
+      .eq("parent_id", parentId);
+
+    if (error) return res.status(500).json({ error: "No se pudo desvincular al padre." });
+
+    return res.status(200).json({ success: true, message: "Padre desvinculado del alumno." });
+  } catch (error: any) {
+    console.error("Error en DELETE /api/v1/students/:id/guardians/:parentId:", error);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // POST /api/v1/students
 // Crea el expediente de un alumno de primer ingreso (inicio del proceso de admisión)
 router.post("/", async (req: Request, res: Response) => {
   try {
-    const { tenant_id, first_name, last_name, grade_section_id, parent_id, photo_url } = req.body;
+    const { tenant_id, first_name, last_name, grade_section_id, parent_id, relationship, photo_url } = req.body;
 
     if (!tenant_id || !first_name || !last_name) {
       return res.status(400).json({ error: "Faltan parámetros requeridos (tenant_id, first_name, last_name)" });
@@ -59,7 +136,7 @@ router.post("/", async (req: Request, res: Response) => {
       await supabaseAdmin.from("parent_students").insert({
         parent_id,
         student_id: student.id,
-        relationship: "parent",
+        relationship: relationship || "acudiente",
       });
     }
 
