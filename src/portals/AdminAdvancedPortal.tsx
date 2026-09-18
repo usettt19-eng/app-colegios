@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2, History, Bell, Send, Radio, DollarSign, X, Layers, Upload } from 'lucide-react';
+import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2, History, Bell, Send, Radio, DollarSign, X, Layers, Upload, Bus } from 'lucide-react';
 import { StudentDirectory } from './StudentDirectory';
 import { BulkImport } from './BulkImport';
+import { TransportManager } from './TransportManager';
 
 // Contexto de demostración: en producción tenant_id viene del token JWT de Supabase Auth (Fase 2)
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -9,7 +10,7 @@ const DEMO_SENDER_ID = '66666666-6666-6666-6666-666666666666';
 
 const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-type TabId = 'terms' | 'courses' | 'schedules' | 'grades_settings' | 'students' | 'bulk_import' | 'costs' | 'organization' | 'audit' | 'communications';
+type TabId = 'terms' | 'courses' | 'schedules' | 'grades_settings' | 'students' | 'bulk_import' | 'transport' | 'costs' | 'organization' | 'audit' | 'communications';
 
 interface AuditLog {
   id: string;
@@ -706,6 +707,12 @@ export const AdminAdvancedPortal: React.FC = () => {
           <Upload className="w-4 h-4 mr-2" /> Importar Datos
         </button>
         <button
+          onClick={() => setActiveTab('transport')}
+          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'transport' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          <Bus className="w-4 h-4 mr-2" /> Transporte
+        </button>
+        <button
           onClick={() => setActiveTab('costs')}
           className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'costs' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
         >
@@ -1042,6 +1049,9 @@ export const AdminAdvancedPortal: React.FC = () => {
 
       {/* Importación Masiva */}
       {activeTab === 'bulk_import' && <BulkImport tenantId={DEMO_TENANT_ID} />}
+
+      {/* Transporte (Buses) */}
+      {activeTab === 'transport' && <TransportManager tenantId={DEMO_TENANT_ID} />}
 
       {/* Costos: Tabla de Cargos por Grado */}
       {activeTab === 'costs' && (

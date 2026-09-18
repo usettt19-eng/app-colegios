@@ -48,6 +48,7 @@ import communicationsRoutes from "./backend/routes/communications";
 import messagesRoutes from "./backend/routes/messages";
 import gradeSettingsRoutes from "./backend/routes/gradeSettings";
 import bulkImportRoutes from "./backend/routes/bulkImport";
+import transportRoutes from "./backend/routes/transport";
 import corporateRoutes from "./backend/routes/corporate";
 import { startAutoReleaseJob } from "./backend/jobs/autoRelease";
 
@@ -75,6 +76,7 @@ app.use("/api/v1/communications", communicationsRoutes);
 app.use("/api/v1/messages", messagesRoutes);
 app.use("/api/v1/grade-settings", gradeSettingsRoutes);
 app.use("/api/v1/bulk-import", bulkImportRoutes);
+app.use("/api/v1/transport", transportRoutes);
 app.use("/api/v1/corporate", corporateRoutes);
 
 // Iniciar procesos en segundo plano
