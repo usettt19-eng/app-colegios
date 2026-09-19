@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2, History, Bell, Send, Radio, DollarSign, X, Layers, Upload, Bus, AlertTriangle, Lock } from 'lucide-react';
+import { Settings2, CalendarRange, BookOpen, CalendarClock, Plus, Loader2, CheckCircle, Users2, Network, DoorOpen, Building2, History, Bell, Send, Radio, DollarSign, X, Layers, Upload, Bus, AlertTriangle, Lock, Menu, ChevronLeft } from 'lucide-react';
 import { StudentDirectory } from './StudentDirectory';
 import { ParentDirectory } from './ParentDirectory';
 import { BulkImport } from './BulkImport';
@@ -163,8 +163,25 @@ interface RiskDashboardRow {
   risk_level: 'alto' | 'medio' | 'ninguno';
 }
 
+const ADMIN_TABS: Array<{ id: TabId; label: string; icon: React.ReactNode }> = [
+  { id: 'terms', label: 'Años Lectivos', icon: <CalendarRange className="w-4 h-4" /> },
+  { id: 'courses', label: 'Cursos y Grupos', icon: <BookOpen className="w-4 h-4" /> },
+  { id: 'schedules', label: 'Horarios', icon: <CalendarClock className="w-4 h-4" /> },
+  { id: 'grades_settings', label: 'Grados y Secciones', icon: <Layers className="w-4 h-4" /> },
+  { id: 'students', label: 'Alumnos y Padres', icon: <Users2 className="w-4 h-4" /> },
+  { id: 'bulk_import', label: 'Importar Datos', icon: <Upload className="w-4 h-4" /> },
+  { id: 'transport', label: 'Transporte', icon: <Bus className="w-4 h-4" /> },
+  { id: 'costs', label: 'Costos', icon: <DollarSign className="w-4 h-4" /> },
+  { id: 'organization', label: 'Organización', icon: <Network className="w-4 h-4" /> },
+  { id: 'audit', label: 'Auditoría', icon: <History className="w-4 h-4" /> },
+  { id: 'communications', label: 'Comunicaciones y LMS', icon: <Radio className="w-4 h-4" /> },
+  { id: 'early_alert', label: 'Alerta Temprana', icon: <AlertTriangle className="w-4 h-4" /> },
+  { id: 'rbac', label: 'Permisos (RBAC)', icon: <Lock className="w-4 h-4" /> },
+];
+
 export const AdminAdvancedPortal: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('terms');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -1135,86 +1152,51 @@ export const AdminAdvancedPortal: React.FC = () => {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
-        <button
-          onClick={() => setActiveTab('terms')}
-          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'terms' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+      {/* Sidebar Navigation */}
+      <div className="flex h-screen overflow-hidden gap-0">
+        {/* Sidebar */}
+        <div
+          className={`bg-slate-900 text-white shadow-lg transition-all duration-300 overflow-y-auto flex-shrink-0 ${
+            sidebarOpen ? 'w-64' : 'w-16'
+          }`}
         >
-          <CalendarRange className="w-4 h-4 mr-2" /> Años Lectivos
-        </button>
-        <button
-          onClick={() => setActiveTab('courses')}
-          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'courses' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-        >
-          <BookOpen className="w-4 h-4 mr-2" /> Cursos y Grupos
-        </button>
-        <button
-          onClick={() => setActiveTab('schedules')}
-          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'schedules' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-        >
-          <CalendarClock className="w-4 h-4 mr-2" /> Horarios
-        </button>
-        <button
-          onClick={() => setActiveTab('grades_settings')}
-          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'grades_settings' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-        >
-          <Layers className="w-4 h-4 mr-2" /> Grados y Secciones
-        </button>
-        <button
-          onClick={() => setActiveTab('students')}
-          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'students' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-        >
-          <Users2 className="w-4 h-4 mr-2" /> Alumnos y Padres
-        </button>
-        <button
-          onClick={() => setActiveTab('bulk_import')}
-          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'bulk_import' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-        >
-          <Upload className="w-4 h-4 mr-2" /> Importar Datos
-        </button>
-        <button
-          onClick={() => setActiveTab('transport')}
-          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'transport' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-        >
-          <Bus className="w-4 h-4 mr-2" /> Transporte
-        </button>
-        <button
-          onClick={() => setActiveTab('costs')}
-          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'costs' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-        >
-          <DollarSign className="w-4 h-4 mr-2" /> Costos
-        </button>
-        <button
-          onClick={() => setActiveTab('organization')}
-          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'organization' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-        >
-          <Network className="w-4 h-4 mr-2" /> Organización
-        </button>
-        <button
-          onClick={() => setActiveTab('audit')}
-          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'audit' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-        >
-          <History className="w-4 h-4 mr-2" /> Auditoría
-        </button>
-        <button
-          onClick={() => setActiveTab('communications')}
-          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'communications' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-        >
-          <Radio className="w-4 h-4 mr-2" /> Comunicaciones y LMS
-        </button>
-        <button
-          onClick={() => setActiveTab('early_alert')}
-          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'early_alert' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-        >
-          <AlertTriangle className="w-4 h-4 mr-2" /> Alerta Temprana
-        </button>
-        <button
-          onClick={() => setActiveTab('rbac')}
-          className={`px-4 py-2 font-bold rounded-t-lg transition-colors flex items-center ${activeTab === 'rbac' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-        >
-          <Lock className="w-4 h-4 mr-2" /> Permisos (RBAC)
-        </button>
-      </div>
+          {/* Sidebar Header */}
+          <div className="p-4 border-b border-slate-700 flex items-center justify-between sticky top-0 bg-slate-900">
+            {sidebarOpen && <span className="font-bold text-sm">Admin Portal</span>}
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="p-1 hover:bg-slate-800 rounded transition-colors"
+            >
+              {sidebarOpen ? (
+                <ChevronLeft className="w-5 h-5" />
+              ) : (
+                <Menu className="w-5 h-5" />
+              )}
+            </button>
+          </div>
+
+          {/* Menu Items */}
+          <nav className="py-2">
+            {ADMIN_TABS.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`w-full text-left px-4 py-3 flex items-center gap-3 transition-colors ${
+                  activeTab === tab.id
+                    ? 'bg-rose-600 text-white border-l-4 border-rose-400'
+                    : 'text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                {tab.icon}
+                {sidebarOpen && <span className="text-sm font-medium">{tab.label}</span>}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 overflow-y-auto bg-slate-50 p-6">
+          <div className="max-w-6xl">
 
       {/* Años Lectivos */}
       {activeTab === 'terms' && (
@@ -2578,6 +2560,9 @@ export const AdminAdvancedPortal: React.FC = () => {
           <RBACManager />
         </div>
       )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
