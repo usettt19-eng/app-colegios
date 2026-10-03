@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String          @id @default(uuid())
+  email            String          @unique
+  passwordHash     String?
+  country          String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  profiles         UserProfile?
+  moodEntries      MoodEntry[]
+  journalEntries   JournalEntry[]
+  chatSessions     ChatSession[]
+  habits           HabitDefinition[]
+  consentRecords   ConsentRecord[]
+}
+
+model UserProfile {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName   String?
+  preferences Json?
+}
+
+model MoodEntry {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  score       Int      // 1 to 5
+  emotions    String[] // e.g., ["ansiedad", "calma"]
+  notes       String?
+  createdAt   DateTime @default(now())
+}
+
+model JournalEntry {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content     String
+  aiSummary   String?
+  createdAt   DateTime @default(now())
+}
+
+model ChatSession {
+  id          String        @id @default(uuid())
+  userId      String
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now())
+  messages    ChatMessage[]
+}
+
+model ChatMessage {
+  id            String      @id @default(uuid())
+  sessionId     String
+  session       ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role          String      // 'user' | 'assistant'
+  content       String
+  createdAt     DateTime    @default(now())
+}
+
+model HabitDefinition {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+model ConsentRecord {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  policyVersion String
+  acceptedAt  DateTime @default(now())
+}

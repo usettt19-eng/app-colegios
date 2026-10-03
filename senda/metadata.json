@@ -1,0 +1,6 @@
+{
+  "name": "Senda",
+  "description": "Tu camino al bienestar emocional y hábitos saludables con el acompañamiento de NOVA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
