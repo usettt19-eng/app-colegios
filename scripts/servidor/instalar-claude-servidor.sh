@@ -12,6 +12,7 @@
 #
 # Cada PROYECTO puede ser:
 #   - un repo de GitHub:  usuario/repo  o  https://github.com/usuario/repo
+#     (agrega @rama para clonar una rama concreta: usuario/repo@mi-rama)
 #     -> se CLONA en /home/<usuario>/proyectos/<repo>. Recomendado: el clon
 #        trae solo lo que está en git, sin los .env ni secretos del servidor.
 #        La primera vez pide un token de GitHub (no se muestra al pegarlo).
@@ -20,10 +21,12 @@
 #        /home/<usuario>/proyectos/<nombre>, sin los archivos .env.
 #
 # Ejemplos:
-#   bash instalar-claude-servidor.sh usettt19-eng/pptx-Narrador usettt19-eng/app-colegios
+#   bash instalar-claude-servidor.sh usettt19-eng/app-colegios@main
 #   bash instalar-claude-servidor.sh --usuario root /root/pptx-Narrador
 #
 # Por defecto usa el usuario sin privilegios "claude" (lo crea si no existe).
+# Además prepara el servicio claude-rc@proyectos, que abre Claude en la
+# carpeta ~/proyectos completa: sirve para crear proyectos nuevos ahí.
 # Se puede correr varias veces: lo que ya está instalado se reutiliza.
 
 set -euo pipefail
@@ -42,7 +45,7 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         -h|--help)
-            sed -n '2,28p' "$0"
+            sed -n '2,31p' "$0"
             exit 0
             ;;
         -*)
@@ -169,6 +172,12 @@ DIRS_FINALES=()
 NOMBRES=()
 for ORIGEN in "${PROYECTOS[@]}"; do
     REF="${ORIGEN#https://github.com/}"
+    RAMA=""
+    if [[ "$REF" == *@* ]]; then
+        RAMA="${REF#*@}"
+        REF="${REF%%@*}"
+        [[ "$RAMA" =~ ^[A-Za-z0-9._/-]+$ ]] || error "Nombre de rama no válido: $RAMA"
+    fi
     REF="${REF%/}"
     REF="${REF%.git}"
 
@@ -179,13 +188,13 @@ for ORIGEN in "${PROYECTOS[@]}"; do
         configurar_github
         install -d -o "$USUARIO" -g "$USUARIO" "$HOME_USUARIO/proyectos"
         if [ -d "$DESTINO/.git" ]; then
-            echo "$DESTINO ya estaba clonado; actualizando con git fetch."
+            echo "$DESTINO ya estaba clonado; actualizando con git fetch (no cambio de rama)."
             como_usuario "git -C '$DESTINO' fetch --all --prune" || aviso "No pude actualizar $DESTINO (sigo con lo que hay)."
         elif [ -e "$DESTINO" ]; then
             error "$DESTINO existe pero no es un repo git. Muévelo o bórralo y vuelve a correr."
         else
-            echo "Clonando github.com/$REF en $DESTINO ..."
-            como_usuario "git clone 'https://github.com/$REF.git' '$DESTINO'" \
+            echo "Clonando github.com/$REF${RAMA:+ (rama $RAMA)} en $DESTINO ..."
+            como_usuario "git clone ${RAMA:+-b '$RAMA' }'https://github.com/$REF.git' '$DESTINO'" \
                 || error "No pude clonar $REF. Revisa que el token tenga acceso a ese repo."
         fi
     else
@@ -225,6 +234,12 @@ install -d /etc/claude-rc
 for i in "${!NOMBRES[@]}"; do
     printf 'DIR=%s\n' "${DIRS_FINALES[$i]}" > "/etc/claude-rc/${NOMBRES[$i]}.conf"
 done
+
+if [ "$USUARIO" != "root" ]; then
+    # Espacio de trabajo general: Claude abierto en ~/proyectos, para proyectos nuevos.
+    install -d -o "$USUARIO" -g "$USUARIO" "$HOME_USUARIO/proyectos"
+    printf 'DIR=%s\n' "$HOME_USUARIO/proyectos" > /etc/claude-rc/proyectos.conf
+fi
 
 cat > /etc/systemd/system/claude-rc@.service <<EOF
 [Unit]
@@ -281,9 +296,14 @@ cat <<EOF
  3) Dejarlo corriendo siempre (arranca también al reiniciar el servidor):
 
 EOF
+if [ -f /etc/claude-rc/proyectos.conf ]; then
+    echo "      systemctl enable --now claude-rc@proyectos   # carpeta general, para proyectos nuevos"
+fi
 for NOMBRE in "${NOMBRES[@]}"; do
     echo "      systemctl enable --now claude-rc@$NOMBRE"
 done
+echo
+echo "      # Activa solo los que vayas a usar: cada uno ocupa ~0,5 GB de RAM."
 cat <<EOF
 
  Útil después:
