@@ -8,16 +8,22 @@
 #     corriendo dentro de tmux, para manejarlo desde claude.ai/code o el celular
 #
 # Uso (como root):
-#   bash instalar-claude-servidor.sh [--usuario NOMBRE] RUTA_PROYECTO [RUTA_PROYECTO ...]
+#   bash instalar-claude-servidor.sh [--usuario NOMBRE] PROYECTO [PROYECTO ...]
+#
+# Cada PROYECTO puede ser:
+#   - un repo de GitHub:  usuario/repo  o  https://github.com/usuario/repo
+#     -> se CLONA en /home/<usuario>/proyectos/<repo>. Recomendado: el clon
+#        trae solo lo que está en git, sin los .env ni secretos del servidor.
+#        La primera vez pide un token de GitHub (no se muestra al pegarlo).
+#   - una carpeta local: /ruta/al/proyecto
+#     -> si el usuario no puede leerla (p. ej. en /root) se COPIA a
+#        /home/<usuario>/proyectos/<nombre>, sin los archivos .env.
 #
 # Ejemplos:
-#   bash instalar-claude-servidor.sh /root/pptx-Narrador
-#   bash instalar-claude-servidor.sh --usuario root /root/pptx-Narrador /root/otro
+#   bash instalar-claude-servidor.sh usettt19-eng/pptx-Narrador usettt19-eng/app-colegios
+#   bash instalar-claude-servidor.sh --usuario root /root/pptx-Narrador
 #
-# Por defecto crea el usuario "claude". Los proyectos que ese usuario no
-# puede leer (por ejemplo los que están en /root) se COPIAN a
-# /home/claude/proyectos/<nombre>. Con --usuario root se usan en su lugar.
-#
+# Por defecto usa el usuario sin privilegios "claude" (lo crea si no existe).
 # Se puede correr varias veces: lo que ya está instalado se reutiliza.
 
 set -euo pipefail
@@ -36,7 +42,7 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         -h|--help)
-            sed -n '2,21p' "$0"
+            sed -n '2,28p' "$0"
             exit 0
             ;;
         -*)
@@ -55,7 +61,7 @@ aviso() { printf '\033[1;33m[aviso]\033[0m %s\n' "$*"; }
 error() { printf '\033[1;31m[error]\033[0m %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || error "Córrelo como root (sudo bash $0 ...)."
-[ ${#PROYECTOS[@]} -gt 0 ] || error "Indica al menos una carpeta de proyecto. Ejemplo: bash $0 /root/pptx-Narrador"
+[ ${#PROYECTOS[@]} -gt 0 ] || error "Indica al menos un proyecto. Ejemplo: bash $0 usettt19-eng/pptx-Narrador"
 [[ "$USUARIO" =~ ^[a-z_][a-z0-9_-]*$ ]] || error "Nombre de usuario no válido: $USUARIO"
 
 como_usuario() {
@@ -132,27 +138,78 @@ fi
 
 # ---------------------------------------------------------------------------
 paso "5/6 Preparando e indexando proyectos"
+
+GITHUB_LISTO=false
+configurar_github() {
+    # Guarda un token de GitHub para $USUARIO (una sola vez) y configura git.
+    [ "$GITHUB_LISTO" = true ] && return
+    local cred="$HOME_USUARIO/.git-credentials"
+    if ! grep -q '@github.com' "$cred" 2>/dev/null; then
+        echo
+        echo "Para clonar (y que Claude pueda subir ramas) necesito un token de GitHub."
+        echo "Créalo en https://github.com/settings/personal-access-tokens/new :"
+        echo "  - Repository access: Only select repositories -> solo los de este comando"
+        echo "  - Permissions: Contents = Read and write (Metadata = Read se agrega solo)"
+        local token=""
+        read -rsp "Pega el token (no se mostrará) y presiona Enter: " token </dev/tty
+        echo
+        [ -n "$token" ] || error "No se recibió ningún token."
+        printf 'https://x-access-token:%s@github.com\n' "$token" >> "$cred"
+        unset token
+        chown "$USUARIO:$USUARIO" "$cred" 2>/dev/null || true
+        chmod 600 "$cred"
+    fi
+    como_usuario 'git config --global credential.helper store'
+    como_usuario 'git config --global user.name >/dev/null || git config --global user.name "Claude (servidor)"'
+    como_usuario 'git config --global user.email >/dev/null || git config --global user.email "claude@$(hostname)"'
+    GITHUB_LISTO=true
+}
+
 DIRS_FINALES=()
 NOMBRES=()
 for ORIGEN in "${PROYECTOS[@]}"; do
-    ORIGEN="$(realpath "$ORIGEN" 2>/dev/null)" || error "No existe la carpeta: $ORIGEN"
-    [ -d "$ORIGEN" ] || error "No es una carpeta: $ORIGEN"
-    NOMBRE="$(basename "$ORIGEN")"
-    [[ "$NOMBRE" =~ ^[A-Za-z0-9._-]+$ ]] || error "El nombre '$NOMBRE' tiene caracteres raros; renombra la carpeta (solo letras, números, . _ -)."
+    REF="${ORIGEN#https://github.com/}"
+    REF="${REF%/}"
+    REF="${REF%.git}"
 
-    if [ "$USUARIO" = "root" ] || su - "$USUARIO" -c "test -r '$ORIGEN' -a -w '$ORIGEN' -a -x '$ORIGEN'"; then
-        DESTINO="$ORIGEN"
-    else
+    if [ ! -e "$ORIGEN" ] && [[ "$REF" =~ ^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$ ]]; then
+        # Repo de GitHub: clonar.
+        NOMBRE="${REF#*/}"
         DESTINO="$HOME_USUARIO/proyectos/$NOMBRE"
-        if [ -e "$DESTINO" ]; then
-            aviso "$DESTINO ya existe; no lo sobrescribo. Bórralo si quieres copiar de nuevo desde $ORIGEN."
+        configurar_github
+        install -d -o "$USUARIO" -g "$USUARIO" "$HOME_USUARIO/proyectos"
+        if [ -d "$DESTINO/.git" ]; then
+            echo "$DESTINO ya estaba clonado; actualizando con git fetch."
+            como_usuario "git -C '$DESTINO' fetch --all --prune" || aviso "No pude actualizar $DESTINO (sigo con lo que hay)."
+        elif [ -e "$DESTINO" ]; then
+            error "$DESTINO existe pero no es un repo git. Muévelo o bórralo y vuelve a correr."
         else
-            install -d -o "$USUARIO" -g "$USUARIO" "$HOME_USUARIO/proyectos"
-            rsync -a "$ORIGEN/" "$DESTINO/"
-            chown -R "$USUARIO:$USUARIO" "$DESTINO"
-            aviso "Copiado $ORIGEN -> $DESTINO. Es una COPIA: Claude trabajará sobre $DESTINO, no sobre el original."
+            echo "Clonando github.com/$REF en $DESTINO ..."
+            como_usuario "git clone 'https://github.com/$REF.git' '$DESTINO'" \
+                || error "No pude clonar $REF. Revisa que el token tenga acceso a ese repo."
+        fi
+    else
+        # Carpeta local.
+        ORIGEN="$(realpath "$ORIGEN" 2>/dev/null)" || error "No existe la carpeta ni parece un repo usuario/repo: $ORIGEN"
+        [ -d "$ORIGEN" ] || error "No es una carpeta: $ORIGEN"
+        NOMBRE="$(basename "$ORIGEN")"
+
+        if [ "$USUARIO" = "root" ] || su - "$USUARIO" -c "test -r '$ORIGEN' -a -w '$ORIGEN' -a -x '$ORIGEN'"; then
+            DESTINO="$ORIGEN"
+        else
+            DESTINO="$HOME_USUARIO/proyectos/$NOMBRE"
+            if [ -e "$DESTINO" ]; then
+                aviso "$DESTINO ya existe; no lo sobrescribo. Bórralo si quieres copiar de nuevo desde $ORIGEN."
+            else
+                install -d -o "$USUARIO" -g "$USUARIO" "$HOME_USUARIO/proyectos"
+                # Sin .env: los secretos del servidor no se copian.
+                rsync -a --include='.env.example' --exclude='.env' --exclude='.env.*' "$ORIGEN/" "$DESTINO/"
+                chown -R "$USUARIO:$USUARIO" "$DESTINO"
+                aviso "Copiado $ORIGEN -> $DESTINO (sin .env). Es una COPIA: Claude trabajará sobre $DESTINO, no sobre el original."
+            fi
         fi
     fi
+    [[ "$NOMBRE" =~ ^[A-Za-z0-9._-]+$ ]] || error "El nombre '$NOMBRE' tiene caracteres raros (solo letras, números, . _ -)."
 
     echo "Indexando $DESTINO ..."
     como_usuario "codebase-memory-mcp cli index_repository --repo-path '$DESTINO'"
