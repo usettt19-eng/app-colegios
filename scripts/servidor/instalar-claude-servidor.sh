@@ -180,8 +180,9 @@ Type=forking
 User=$USUARIO
 EnvironmentFile=/etc/claude-rc/%i.conf
 Environment=PATH=$BIN_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=$TMUX_BIN new-session -d -s rc-%i -c \${DIR} $BIN_DIR/claude remote-control
-ExecStop=$TMUX_BIN kill-session -t rc-%i
+# Socket propio (-L) para no mezclarse con otras sesiones tmux del mismo usuario.
+ExecStart=$TMUX_BIN -L claude-rc-%i new-session -d -s rc-%i -c \${DIR} $BIN_DIR/claude remote-control
+ExecStop=$TMUX_BIN -L claude-rc-%i kill-session -t rc-%i
 Restart=on-failure
 RestartSec=30
 
@@ -230,7 +231,7 @@ cat <<EOF
 
  Útil después:
    Ver estado:          systemctl status claude-rc@${NOMBRES[0]}
-   Ver la terminal:     su - $USUARIO -c 'tmux attach -t rc-${NOMBRES[0]}'   (salir: Ctrl+B y luego D)
+   Ver la terminal:     su - $USUARIO -c 'tmux -L claude-rc-${NOMBRES[0]} attach -t rc-${NOMBRES[0]}'   (salir: Ctrl+B y luego D)
    Reiniciar:           systemctl restart claude-rc@${NOMBRES[0]}
    Reindexar:           su - $USUARIO -c 'codebase-memory-mcp cli index_repository --repo-path ${DIRS_FINALES[0]}'
    Agregar proyecto:    vuelve a correr este script con la nueva carpeta.
